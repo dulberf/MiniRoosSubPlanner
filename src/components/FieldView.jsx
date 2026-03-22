@@ -19,7 +19,7 @@ function calcSize(w) {
   return Math.min(108, Math.max(40, Math.round(w * 0.21)));
 }
 
-export default function FieldView({ assignment, highlight, swapFrom, onPlayerClick }) {
+export default function FieldView({ assignment, highlight, swapFrom, onPlayerClick, upcomingSubs = [] }) {
   const containerRef = useRef(null);
   const [tokenSize, setTokenSize] = useState(40);
 
@@ -63,7 +63,8 @@ export default function FieldView({ assignment, highlight, swapFrom, onPlayerCli
       </div>
 
       {FIELD_LAYOUT.map(({ pos, x, y }) => {
-        const name = assignment[pos];
+        const name    = assignment[pos];
+        const subInfo = upcomingSubs.find(s => s.pos === pos) || null;
 
         // Determine swap highlight state
         let isSel = false;
@@ -84,6 +85,7 @@ export default function FieldView({ assignment, highlight, swapFrom, onPlayerCli
               left: `${x}%`, top: `${y}%`,
               transform: 'translate(-50%, -50%)',
               zIndex: 10,
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
             }}
           >
             <PlayerToken
@@ -92,9 +94,25 @@ export default function FieldView({ assignment, highlight, swapFrom, onPlayerCli
               isHL={!swapFrom && !!(highlight && highlight === name)}
               isSel={isSel}
               isTgt={isTgt}
-              onClick={name && onPlayerClick ? () => onPlayerClick(name, pos) : null}
+onClick={name && onPlayerClick ? () => onPlayerClick(name, pos) : null}
               size={tokenSize}
             />
+            {subInfo && (
+              <div style={{
+                marginTop: 3, textAlign: 'center',
+                background: '#059669', color: '#fff',
+                borderRadius: 8, padding: '2px 7px',
+                fontSize: Math.max(9, Math.round(tokenSize * 0.16)),
+                whiteSpace: 'nowrap',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+                lineHeight: 1.3,
+              }}>
+                ▲ {subInfo.on}
+                <div style={{ fontSize: Math.max(8, Math.round(tokenSize * 0.13)), opacity: 0.9 }}>
+                  {subInfo.htBefore ? 'HT' : `@ ${subInfo.atMin} min`}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

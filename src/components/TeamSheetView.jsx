@@ -100,6 +100,17 @@ export default function TeamSheetView({
     return m;
   }, [players, playerSchedule]);
 
+  // Upcoming sub changes for the next segment (drives field overlays + info bar)
+  const upcomingSubs = useMemo(() => {
+    if (currentSeg >= segments.length - 1) return [];
+    const changes = getSubChanges(segments[currentSeg], segments[currentSeg + 1]);
+    const atMin   = getStartMin(segments, currentSeg + 1);
+    const nextSeg = segments[currentSeg + 1];
+    return changes
+      .filter(c => c.type === 'sub')
+      .map(c => ({ pos: c.pos, on: c.on, off: c.off, atMin, htBefore: nextSeg.htBefore }));
+  }, [currentSeg, segments]);
+
   // ── Navigation ─────────────────────────────────────────────────────────────
   const goToSeg = (i) => {
     setCurrentSeg(i);
@@ -433,24 +444,38 @@ export default function TeamSheetView({
           if (!changes.length) return null;
           const nextSeg  = segments[currentSeg + 1];
           const nextTime = getStartMin(segments, currentSeg + 1);
+          const timeLabel = nextSeg.htBefore ? '⏸ Half Time' : `⏱ ${nextTime} min`;
           return (
             <div style={{
-              marginTop: 4, padding: '6px 8px',
-              background: '#fffbeb', borderRadius: 7,
-              border: '1px solid #fde68a', fontSize: 10,
-              display: 'flex', flexWrap: 'wrap', gap: '2px 6px', alignItems: 'center',
+              marginTop: 6, padding: '10px 12px',
+              background: '#fff7ed', borderRadius: 10,
+              border: '2px solid #f59e0b',
             }}>
-              <span style={{ fontWeight: 700, color: '#92400e', flexShrink: 0 }}>
-                {nextSeg.htBefore ? '⏸ HT:' : `${nextTime} min:`}
-              </span>
-              {changes.slice(0, 3).map((c, ci) => (
-                <span key={ci} style={{ color: '#4a6b8a' }}>
-                  {c.type === 'sub'       && <><PosBadge pos={c.pos} /> ▲{c.on} ▼{c.off}</>}
-                  {c.type === 'gk'        && <>🧤 ▲{c.on} ▼{c.off}</>}
-                  {c.type === 'poschange' && <>{c.player}: <PosBadge pos={c.from} />→<PosBadge pos={c.to} /></>}
-                </span>
-              ))}
-              {changes.length > 3 && <span style={{ color: '#7a96b0' }}>+{changes.length - 3} more</span>}
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#92400e', marginBottom: 7 }}>
+                {timeLabel}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {changes.map((c, ci) => (
+                  <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {c.type === 'sub' && <>
+                      <span style={{ background: '#dc2626', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▼ {c.off}</span>
+                      <span style={{ fontSize: 18, color: '#94a3b8', flexShrink: 0 }}>→</span>
+                      <span style={{ background: '#059669', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▲ {c.on}</span>
+                      <PosBadge pos={c.pos} />
+                    </>}
+                    {c.type === 'gk' && <>
+                      <span style={{ background: '#dc2626', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▼ {c.off} 🧤</span>
+                      <span style={{ fontSize: 18, color: '#94a3b8', flexShrink: 0 }}>→</span>
+                      <span style={{ background: '#059669', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▲ {c.on} 🧤</span>
+                    </>}
+                    {c.type === 'poschange' && (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#1558b0' }}>
+                        {c.player}: <PosBadge pos={c.from} /> → <PosBadge pos={c.to} />
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           );
         })()}
@@ -989,6 +1014,7 @@ export default function TeamSheetView({
                   highlight={editMode ? null : highlight}
                   swapFrom={editMode ? swapFrom : null}
                   onPlayerClick={handleFieldClick}
+                  upcomingSubs={editMode ? [] : upcomingSubs}
                 />
               </div>
             </div>
