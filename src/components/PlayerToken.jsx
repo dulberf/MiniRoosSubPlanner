@@ -90,16 +90,19 @@ export default function PlayerToken({ pos, name, isHL, isSel, isTgt, onClick, si
         }}>
           {name || '—'}
         </span>
-      </div>
 
-      {/* Position label below circle */}
-      <div style={{
-        fontSize: Math.max(7, size * 0.18),
-        fontWeight: 700, color: 'rgba(255,255,255,0.85)',
-        marginTop: 2, letterSpacing: 0.3,
-        textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-      }}>
-        {pos}
+        {/* Position label — inside circle, bottom edge */}
+        <div style={{
+          position: 'absolute', bottom: 7, left: 0, right: 0,
+          textAlign: 'center',
+          fontSize: Math.max(6, Math.round(size * 0.15)),
+          fontWeight: 700, color: nameText,
+          letterSpacing: 0.3,
+          lineHeight: 1,
+          pointerEvents: 'none',
+        }}>
+          {pos}
+        </div>
       </div>
     </div>
   );

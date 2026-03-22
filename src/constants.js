@@ -8,14 +8,14 @@ export const OUTFIELD = ['LB', 'CB', 'RB', 'LM', 'CM', 'RM', 'LF', 'RF'];
 // Source: spec FIELD_LAYOUT table — do not change
 export const FIELD_LAYOUT = [
   { pos: 'GK', x: 50, y: 88 },
-  { pos: 'LB', x: 20, y: 72 },
-  { pos: 'CB', x: 50, y: 72 },
-  { pos: 'RB', x: 80, y: 72 },
-  { pos: 'LM', x: 20, y: 50 },
-  { pos: 'CM', x: 50, y: 50 },
-  { pos: 'RM', x: 80, y: 50 },
-  { pos: 'LF', x: 30, y: 22 },
-  { pos: 'RF', x: 70, y: 22 },
+  { pos: 'LB', x: 20, y: 65 },
+  { pos: 'CB', x: 50, y: 65 },
+  { pos: 'RB', x: 80, y: 65 },
+  { pos: 'LM', x: 20, y: 42 },
+  { pos: 'CM', x: 50, y: 42 },
+  { pos: 'RM', x: 80, y: 42 },
+  { pos: 'LF', x: 30, y: 19 },
+  { pos: 'RF', x: 70, y: 19 },
 ];
 
 // Position colour scheme — user preference, do NOT change

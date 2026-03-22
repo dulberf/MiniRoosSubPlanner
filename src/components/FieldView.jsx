@@ -97,22 +97,22 @@ export default function FieldView({ assignment, highlight, swapFrom, onPlayerCli
 onClick={name && onPlayerClick ? () => onPlayerClick(name, pos) : null}
               size={tokenSize}
             />
-            {subInfo && (
-              <div style={{
-                marginTop: 3, textAlign: 'center',
-                background: '#059669', color: '#fff',
-                borderRadius: 8, padding: '2px 7px',
-                fontSize: Math.max(9, Math.round(tokenSize * 0.16)),
-                whiteSpace: 'nowrap',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
-                lineHeight: 1.3,
-              }}>
-                ▲ {subInfo.on}
-                <div style={{ fontSize: Math.max(8, Math.round(tokenSize * 0.13)), opacity: 0.9 }}>
-                  {subInfo.htBefore ? 'HT' : `@ ${subInfo.atMin} min`}
-                </div>
+            <div style={{
+              marginTop: 8, textAlign: 'center',
+              background: subInfo ? '#059669' : 'transparent',
+              color: '#fff',
+              borderRadius: 8, padding: '2px 7px',
+              fontSize: Math.max(9, Math.round(tokenSize * 0.16)),
+              whiteSpace: 'nowrap',
+              boxShadow: subInfo ? '0 1px 4px rgba(0,0,0,0.35)' : 'none',
+              lineHeight: 1.3,
+              visibility: subInfo ? 'visible' : 'hidden',
+            }}>
+              ▲ {subInfo?.on ?? '—'}
+              <div style={{ fontSize: Math.max(8, Math.round(tokenSize * 0.13)), opacity: 0.9 }}>
+                {subInfo?.htBefore ? 'HT' : `@ ${subInfo?.atMin ?? 0} min`}
               </div>
-            )}
+            </div>
           </div>
         );
       })}
