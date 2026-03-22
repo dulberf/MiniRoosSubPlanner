@@ -90,24 +90,58 @@ export default function App() {
   // ── Manual player swap within a segment
   const handleSwap = useCallback((segIdx, swapAction) => {
     setSegments(prev => {
-      const updated = prev.map((s, i) => i === segIdx ? applySwap(s, swapAction) : s);
-      // If swapping the GK position, propagate the new GK through remaining same-half segments
-      const seg      = updated[segIdx];
-      const newGK    = seg.assignment.GK;
-      const oldGK    = prev[segIdx].assignment.GK;
-      const swappedGK = (swapAction.from?.pos === 'GK' || swapAction.to?.pos === 'GK') ||
-                        (seg.assignment.GK !== prev[segIdx].assignment.GK);
+      const updated = [...prev];
+      updated[segIdx] = applySwap(prev[segIdx], swapAction);
 
-      if (swappedGK && newGK !== oldGK) {
-        return updated.map((s, i) => {
-          if (i <= segIdx) return s;
-          if (s.half !== seg.half) return s;
-          if (s.assignment.GK === oldGK) {
-            return { ...s, assignment: { ...s.assignment, GK: newGK }, gkName: newGK, edited: true };
+      // Position persistence: propagate forward through subsequent segments.
+      //
+      // Rule: any player who stays on the field keeps the exact position they
+      // held in the previous (already-updated) segment. Players coming on from
+      // the bench slot into whichever positions were vacated by those going off.
+      //
+      // Stops at the half-time boundary — H2 positions are managed separately.
+      for (let i = segIdx + 1; i < updated.length; i++) {
+        const prevSeg = updated[i - 1]; // previous segment (already updated)
+        const currSeg = updated[i];     // segment to recompute
+
+        // Half-time is a hard reset — don't carry positions into the next half
+        if (currSeg.htBefore) break;
+
+        const prevBenchSet = new Set(prevSeg.bench);
+        const currBenchSet = new Set(currSeg.bench);
+
+        // Start with every player in their prevSeg position
+        const newAssignment = { ...prevSeg.assignment };
+
+        // Remove players who are going to bench this segment;
+        // record the positions they vacate
+        const vacatedPositions = [];
+        Object.entries(newAssignment).forEach(([pos, name]) => {
+          if (currBenchSet.has(name)) {
+            delete newAssignment[pos];
+            vacatedPositions.push(pos);
           }
-          return s;
         });
+
+        // Incoming players: were on bench in prevSeg, now on field in currSeg
+        const incomingPlayers = Object.values(currSeg.assignment)
+          .filter(name => name && prevBenchSet.has(name));
+
+        // Slot each incoming player into a vacated position
+        incomingPlayers.forEach((name, idx) => {
+          if (vacatedPositions[idx] !== undefined) {
+            newAssignment[vacatedPositions[idx]] = name;
+          }
+        });
+
+        updated[i] = {
+          ...currSeg,
+          assignment: newAssignment,
+          gkName: newAssignment.GK || currSeg.gkName,
+          edited: true,
+        };
       }
+
       return updated;
     });
     setIsSaved(false);
