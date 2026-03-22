@@ -7,29 +7,35 @@
  *   swapFrom      – { type, pos?, name } | null  — currently selected for swap
  *   onPlayerClick – (name, pos) => void, or null for read-only
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import FieldSVG    from './FieldSVG.jsx';
 import PlayerToken from './PlayerToken.jsx';
 import { FIELD_LAYOUT } from '../constants.js';
 
-function useTokenSize() {
-  const [size, setSize] = useState(() =>
-    Math.min(120, Math.max(40, Math.round(window.innerWidth * 0.085)))
-  );
-  useEffect(() => {
-    const update = () =>
-      setSize(Math.min(120, Math.max(40, Math.round(window.innerWidth * 0.085))));
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-  return size;
+// Compute token size from actual field container width.
+// Min gap between adjacent tokens (30% field width) sets the ceiling;
+// coefficient 0.21 leaves comfortable clearance at any size.
+function calcSize(w) {
+  return Math.min(108, Math.max(40, Math.round(w * 0.21)));
 }
 
 export default function FieldView({ assignment, highlight, swapFrom, onPlayerClick }) {
-  const tokenSize = useTokenSize();
+  const containerRef = useRef(null);
+  const [tokenSize, setTokenSize] = useState(40);
+
+  const measure = useCallback(() => {
+    if (containerRef.current) setTokenSize(calcSize(containerRef.current.offsetWidth));
+  }, []);
+
+  useEffect(() => {
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [measure]);
 
   return (
-    <div style={{
+    <div ref={containerRef} style={{
       position: 'relative', width: '100%', paddingBottom: '148%',
       background: 'linear-gradient(180deg, #2d7a3a 0%, #3a8f48 30%, #2d7a3a 60%, #3a8f48 85%, #2d7a3a 100%)',
       borderRadius: 14, overflow: 'hidden',
