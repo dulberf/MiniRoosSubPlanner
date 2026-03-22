@@ -83,7 +83,7 @@ export default function PlayerToken({ pos, name, isHL, isSel, isTgt, onClick, si
         <span style={{
           fontSize: Math.max(8, size * 0.19),
           fontWeight: 700, color: nameText, textAlign: 'center',
-          lineHeight: 1.1, padding: '0 2px',
+          lineHeight: 1.25, padding: '0 2px',
           maxWidth: size - 4, overflow: 'hidden',
           display: '-webkit-box', WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',

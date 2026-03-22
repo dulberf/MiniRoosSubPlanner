@@ -54,14 +54,16 @@ git add team-sheet-offline.html src/ && git commit -m "..." && git push origin m
 | Pos | X% | Y% |
 |-----|----|----|
 | GK  | 50 | 88 |
-| LB  | 20 | 72 |
-| CB  | 50 | 72 |
-| RB  | 80 | 72 |
-| LM  | 20 | 50 |
-| CM  | 50 | 50 |
-| RM  | 80 | 50 |
-| LF  | 30 | 22 |
-| RF  | 70 | 22 |
+| LB  | 20 | 65 |
+| CB  | 50 | 65 |
+| RB  | 80 | 65 |
+| LM  | 20 | 42 |
+| CM  | 50 | 42 |
+| RM  | 80 | 42 |
+| LF  | 30 | 19 |
+| RF  | 70 | 19 |
+
+All row gaps are uniform at 23% to ensure the sub label below each token never overlaps the row below.
 
 ### Position colour scheme (LOCKED — do not change)
 | Position | Background | Text |
@@ -73,12 +75,17 @@ git add team-sheet-offline.html src/ && git commit -m "..." && git push origin m
 
 > ⚠️ RB/RM/RF are BLACK. The original `CLAUDE_CODE_HANDOFF.md` incorrectly described them as "light grey". Do not change them.
 
-### Token sizing (`src/components/PlayerToken.jsx`)
+### Token sizing (`src/components/FieldView.jsx`)
+Token size is calculated from the **field container width** (via ResizeObserver), not `window.innerWidth`:
 ```js
-size = Math.min(120, Math.max(40, Math.round(window.innerWidth * 0.085)))
+size = Math.min(108, Math.max(40, Math.round(containerWidth * 0.21)))
 ```
-Font size inside the circle: `Math.max(7, size * 0.175)`.
-**See §6 below — increasing token size is a pending task.**
+Font size inside the circle: `Math.max(8, size * 0.19)`.
+
+### Token layout
+- **Player name** — centred in the circle, 2-line clamp, `lineHeight: 1.25`
+- **Position label** — inside the circle, absolutely positioned at the bottom edge (`bottom: 7`), same colour as the player name text, no shadow
+- **Sub label** — rendered below the circle for every token (always reserves space via `visibility: hidden` when no sub is scheduled), turns visible green pill showing `▲ [name] / @ X min` when a substitution is coming
 
 ---
 
@@ -158,7 +165,7 @@ Deduplication key: `date + JSON.stringify(players) + label`.
 
 ## 6. Next Tasks (Priority Order)
 
-### 6.1 Increase player circle size
+### 6.1 ✅ Increase player circle size — DONE
 **What:** Tokens on the field feel too small, especially on iPad.
 **Where:** `src/components/PlayerToken.jsx` (the `size` prop) and `src/components/FieldView.jsx` (where size is calculated and passed in).
 **Current formula:**
@@ -175,7 +182,28 @@ At 768px (iPad) this gives ~77px vs current ~65px. Also check that tokens don't 
 
 ---
 
-### 6.2 Match result — scoreline
+### 6.2 Player number on token
+**What:** Optional player number displayed inside the token at the top — mirroring the position label at the bottom. When enabled, each player is assigned a squad number (1–99) in the setup screen and it appears on their token during the game.
+
+**Where:**
+- `src/components/InputView.jsx` — setup screen, add optional number input per player (or a numbered list the coach can assign)
+- `src/App.jsx` — pass `playerNumbers: { [name]: number }` through to `TeamSheetView` and down to `FieldView` / `PlayerToken`
+- `src/components/PlayerToken.jsx` — add `number` prop; render it identically to the position label but at `top: 7` (inside the circle, top edge). Same font size (`Math.max(6, Math.round(size * 0.15))`), same colour as `nameText`, no shadow.
+
+**Design rules:**
+- The number label is absolutely positioned inside the circle at `top: 7, left: 0, right: 0, textAlign: 'center'` — the mirror image of the position label at `bottom: 7`
+- Show/hide is controlled by whether a number is assigned; no number = nothing rendered (position is already reserved by the circle size)
+- Numbers are per-player (not per-position) and persist across segments
+
+**Data shape addition:**
+```js
+// In App state, add alongside players[]:
+playerNumbers: { [playerName]: number | null }  // null = no number assigned
+```
+
+---
+
+### 6.3 Match result — scoreline
 **What:** Record the final match score (our team's goals vs opponent). Currently only per-player goal counts are tracked; there is no opponent score or final result field.
 **Where:**
 - `src/components/TeamSheetView.jsx` — Save panel (currently has match label, POTM, per-player goals)
@@ -196,7 +224,7 @@ opponentGoals: number,   // defaults to 0 if not recorded
 
 ---
 
-### 6.3 Assist tracking
+### 6.4 Assist tracking
 **What:** Track which player provided the assist for each goal, alongside goals.
 **Where:** Same places as 6.2 — journey panel on the field tab, save panel, season totals.
 
@@ -216,7 +244,7 @@ assists: { [player]: number },  // only non-zero values stored (same pattern as 
 
 ---
 
-### 6.4 Improve statistics display
+### 6.5 Improve statistics display
 **What:** The Stats tab currently shows playing time bars with minute counts and a bench badge. It could be more informative.
 
 **Suggested improvements (discuss with user before building):**
@@ -248,12 +276,12 @@ assists: { [player]: number },  // only non-zero values stored (same pattern as 
 
 ## 8. What Was Fixed in the Most Recent Session
 
-1. **Position persistence after swap** — `handleSwap` in `App.jsx` now propagates the swapped positions forward through all subsequent segments in the same half. Previously, a swap in period 1 would not carry through to period 2.
-2. **Position colours** — RB/RM/RF correctly set to black `#111827`. CB/CM set to lighter grey `#b0bec5`.
-3. **GK text colour** — Set to dark navy `#0f2d5a` (was incorrectly white on magenta).
-4. **Segment label format** — Uses "H1 0–10" style throughout.
-5. **Date format** — Fixed to `D/M/YYYY`.
-6. **10-player schedule** — Confirmed and implemented as 10×5min segments, HT after segment 4.
+1. **Sub info bar redesigned** — replaced small pale yellow bar with a prominent amber card (`#fff7ed`, `2px solid #f59e0b`). Time shown as large header (`⏱ X min`), each sub as a separate row with large red pill (▼ off) → green pill (▲ on) + position badge.
+2. **Field sub overlays** — each token at a position being subbed shows a green label below (`▲ Name / @ X min`). Space is always reserved via `visibility: hidden` so tokens never shift when the label appears.
+3. **Token layout** — position label moved inside the circle (bottom edge, `bottom: 7`), matching player name colour, no shadow. Frees space below each token for the sub label.
+4. **Uniform row spacing** — all row gaps equalised to 23% (LF y=19, LM y=42, LB y=65, GK y=88).
+5. **Token sizing** — switched from `window.innerWidth` to container `ResizeObserver` width for accurate scaling. Formula: `Math.min(108, Math.max(40, Math.round(w * 0.21)))`.
+6. **Preview viewport** — set to tablet (768px) as default test size.
 
 ---
 
