@@ -411,7 +411,7 @@ export default function TeamSheetView({
               key={i}
               onClick={() => goToSeg(i)}
               style={{
-                flexShrink: 0, padding: '3px 8px',
+                flexShrink: 0, padding: '5px 8px',
                 background: i === currentSeg
                   ? (s.half === 2 ? '#059669' : 'linear-gradient(135deg, #1558b0, #1d6fcf)')
                   : '#ffffff',
@@ -435,7 +435,7 @@ export default function TeamSheetView({
           const nextTime = getStartMin(segments, currentSeg + 1);
           return (
             <div style={{
-              marginTop: 4, padding: '4px 8px',
+              marginTop: 4, padding: '6px 8px',
               background: '#fffbeb', borderRadius: 7,
               border: '1px solid #fde68a', fontSize: 10,
               display: 'flex', flexWrap: 'wrap', gap: '2px 6px', alignItems: 'center',
