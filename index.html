@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<!--
+  Team Sheet Planner — source project.
+  Run `npm run dev` for live editing.
+  Run `npm run release` to build the offline single-file HTML.
+  Uses React (https://react.dev) — MIT License, Copyright (c) Meta Platforms, Inc.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Team Sheet" />
+  <title>Team Sheet Planner</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f0f6ff; -webkit-tap-highlight-color: transparent; }
+    button { touch-action: manipulation; }
+    @keyframes glow {
+      0%, 100% { opacity: 0.6; transform: translate(-50%, -54%) scale(1); }
+      50%       { opacity: 0.25; transform: translate(-50%, -54%) scale(1.25); }
+    }
+    @keyframes spin {
+      from { transform: translate(-50%, -54%) rotate(0deg); }
+      to   { transform: translate(-50%, -54%) rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
