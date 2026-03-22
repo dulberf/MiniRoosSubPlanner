@@ -182,7 +182,24 @@ At 768px (iPad) this gives ~77px vs current ~65px. Also check that tokens don't 
 
 ---
 
-### 6.2 Player number on token
+### 6.2 Remove all glow and animation from tokens
+**What:** The player tokens currently have animated effects — a spinning dashed green ring on swap targets, an animated yellow glow ring on highlighted players, and a box-shadow glow on selected/target/highlighted states. These feel distracting. Remove all of them, keeping only the static visual differentiation (background colour change, border colour change).
+
+**Where:** `src/components/PlayerToken.jsx`
+
+**Changes needed:**
+1. **Remove the spinning target ring** — delete the `isTgt` ring div entirely (the one with `animation: 'spin 2.5s linear infinite'`). The green background colour on the circle already signals it's a valid swap target.
+2. **Remove the animated glow ring** — delete the `isHL` ring div (the one with `animation: 'glow 1.5s ease-in-out infinite'`). Highlighted state is already clear from the amber circle gradient.
+3. **Remove the `@keyframes spin` and `@keyframes glow` CSS** — these are injected via a `<style>` tag somewhere in the component tree (likely `FieldView.jsx` or `TeamSheetView.jsx`). Find and delete them.
+4. **Simplify box-shadows** — replace glow box-shadows on `isSel`, `isTgt`, `isHL` states with a simple non-glowing shadow (e.g. `'0 2px 8px rgba(0,0,0,0.25)'`) or remove the shadow variation entirely.
+
+**What to keep:**
+- The `isSel` selection ring (static blue border, no animation) — this clearly shows which token is selected for swapping
+- Background colour and border colour changes for all states (these are static, not animated)
+
+---
+
+### 6.4 Player number on token
 **What:** Optional player number displayed inside the token at the top — mirroring the position label at the bottom. When enabled, each player is assigned a squad number (1–99) in the setup screen and it appears on their token during the game.
 
 **Where:**
@@ -224,7 +241,7 @@ opponentGoals: number,   // defaults to 0 if not recorded
 
 ---
 
-### 6.4 Assist tracking
+### 6.5 Assist tracking
 **What:** Track which player provided the assist for each goal, alongside goals.
 **Where:** Same places as 6.2 — journey panel on the field tab, save panel, season totals.
 
@@ -244,7 +261,7 @@ assists: { [player]: number },  // only non-zero values stored (same pattern as 
 
 ---
 
-### 6.5 Improve statistics display
+### 6.6 Improve statistics display
 **What:** The Stats tab currently shows playing time bars with minute counts and a bench badge. It could be more informative.
 
 **Suggested improvements (discuss with user before building):**
