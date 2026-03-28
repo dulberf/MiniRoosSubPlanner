@@ -1,11 +1,11 @@
 # MiniRoos Team Sheet Planner — Session Handoff
-*Last updated: March 2026. Use this as the starting point for all new Claude Code sessions.*
+*Last updated: 29 March 2026. Use this as the starting point for all new Claude Code sessions.*
 
 ---
 
 ## 1. What the App Is
 
-A substitution and rotation planner for 9v9 junior (MiniRoos) soccer. The coach enters 9–12 player names, the app generates a full rotation schedule ensuring fair playing time and bench rotation, and the coach can manage the game live (swapping players, tracking goals, assigning POTM). Results are saved to a season history with fairness statistics.
+A substitution and rotation planner for 9v9 junior (MiniRoos) soccer. The coach enters up to 12 player names (undersized squads below 9 are also supported), the app generates a full rotation schedule ensuring fair playing time and bench rotation, and the coach can manage the game live (swapping players, tracking goals, assigning POTM). Results are saved to a season history with fairness statistics.
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live file (GitHub Pages):** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -94,12 +94,14 @@ Font size inside the circle: `Math.max(8, size * 0.19)`.
 ### Segment schedules by squad size (`src/scheduler.js` → `getSegmentConfig`)
 | Players | Segments | Durations | HT after seg (0-based) | Bench spots |
 |---------|----------|-----------|----------------------|-------------|
-| 9  | 1  | [50]                           | -1 (no bench) | 0 |
+| ≤9 | 1  | [50]                           | -1 (no bench) | 0 |
 | 10 | 10 | [5,5,5,5,5,5,5,5,5,5]         | 4             | 1 |
 | 11 | 6  | [5,10,10,10,10,5]              | 2             | 2 |
 | 12 | 4  | [10,15,10,15]                  | 1             | 3 |
 
 > ⚠️ The original `CLAUDE_CODE_HANDOFF.md` incorrectly listed 10 players as `5 × 10 min`. The correct implementation is `10 × 5 min` with HT after segment 4.
+
+> **Undersized squads (< 9):** `getSegmentConfig` returns the single-segment config for any squad ≤ 9. `buildSchedule` uses `benchSize <= 0` to enter the no-bench path, with null-coalescing on outfield assignment to handle missing players safely.
 
 ### Segment object shape
 ```js
@@ -291,8 +293,16 @@ assists: { [player]: number },  // only non-zero values stored (same pattern as 
 
 ---
 
-## 8. What Was Fixed in the Most Recent Session
+## 8. What Was Changed in Recent Sessions
 
+### Session 3 (29 March 2026) — Algorithm: undersized squads, positional continuity, cleanup
+1. **Undersized squad support** — `getSegmentConfig` now handles squads ≤ 9 via an early guard (`if (squadSize <= 9)`). `buildSchedule` condition changed from `benchSize === 0` to `benchSize <= 0` with null-coalescing (`?? null`) on outfield assignment to prevent undefined player slots.
+2. **Positional continuity** — `buildSchedule` now tracks each player's last outfield position in a `lastOutfieldPos` map. When players return from the bench, a two-pass reconciliation prefers their previous position (pass 1) before falling back to index-based assignment (pass 2). Applies to both regular subs and half-time GK rotation.
+3. **DRY fix in `getSecondGKSlot`** — removed hardcoded `cfg` object; now calls `getSegmentConfig(squadSize)` and derives `nSegs` and `benchSize` dynamically.
+4. **`applySwap` modernised** — replaced `JSON.parse(JSON.stringify(segment))` with `structuredClone(segment)`.
+5. **Gemini UI handoff** — created `GEMINI_UI_HANDOFF.md` for UI/UX review by a separate AI agent.
+
+### Session 2 — UI: field layout, tokens, sub overlays
 1. **Sub info bar redesigned** — replaced small pale yellow bar with a prominent amber card (`#fff7ed`, `2px solid #f59e0b`). Time shown as large header (`⏱ X min`), each sub as a separate row with large red pill (▼ off) → green pill (▲ on) + position badge.
 2. **Field sub overlays** — each token at a position being subbed shows a green label below (`▲ Name / @ X min`). Space is always reserved via `visibility: hidden` so tokens never shift when the label appears.
 3. **Token layout** — position label moved inside the circle (bottom edge, `bottom: 7`), matching player name colour, no shadow. Frees space below each token for the sub label.

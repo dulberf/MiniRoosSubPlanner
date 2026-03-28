@@ -21,8 +21,8 @@ import { OUTFIELD } from './constants.js';
  *              (-1 means no half-time break / no bench, i.e. 9 players)
  */
 export function getSegmentConfig(squadSize) {
+  if (squadSize <= 9) return { durs: [50], htAfterSeg: -1 };
   switch (squadSize) {
-    case 9:  return { durs: [50],                   htAfterSeg: -1 };
     case 10: return { durs: [5,5,5,5,5,5,5,5,5,5], htAfterSeg: 4  };
     case 11: return { durs: [5,10,10,10,10,5],      htAfterSeg: 2  };
     case 12: return { durs: [10,15,10,15],           htAfterSeg: 1  };
@@ -107,12 +107,12 @@ export function buildBenchMinuteWeights(squadSize) {
 export function getSecondGKSlot(squadSize) {
   if (squadSize <= 9) return -1;
 
-  const cfg = {
-    10: { htAfterSeg: 4, benchSize: 1, nSegs: 10 },
-    11: { htAfterSeg: 2, benchSize: 2, nSegs: 6  },
-    12: { htAfterSeg: 1, benchSize: 3, nSegs: 4  },
-  };
-  const { htAfterSeg, benchSize, nSegs } = cfg[squadSize];
+  const config = getSegmentConfig(squadSize);
+  if (!config) return -1;
+
+  const { durs, htAfterSeg } = config;
+  const nSegs     = durs.length;
+  const benchSize = squadSize - 9;
   const slots = buildBenchSlots(squadSize, nSegs, benchSize, htAfterSeg, false);
   // The player in the last bench slot before half-time becomes 2nd-half GK
   return slots[htAfterSeg * benchSize];
@@ -210,9 +210,9 @@ export function buildSchedule(players, lockGKFullGame = false) {
   const benchSize = n - 9;
 
   // ── 9-player special case: no bench, single segment ──────────────────────
-  if (benchSize === 0) {
+  if (benchSize <= 0) {
     const assignment = { GK: players[0] };
-    OUTFIELD.forEach((pos, i) => { assignment[pos] = players[i + 1]; });
+    OUTFIELD.forEach((pos, i) => { assignment[pos] = players[i + 1] ?? null; });
     return [{
       segIdx: 0, assignment, bench: [], gkName: players[0],
       duration: 50, label: 'H1 0–50',
@@ -247,6 +247,12 @@ export function buildSchedule(players, lockGKFullGame = false) {
   // posMap: position name → player *index* (so we can track as subs happen)
   let posMap = { GK: gk0 };
   OUTFIELD.forEach((pos, i) => { posMap[pos] = out0[i] ?? null; });
+
+  // Track each player's last outfield position for continuity on return
+  const lastOutfieldPos = {};  // playerIndex → position name
+  OUTFIELD.forEach(pos => {
+    if (posMap[pos] !== null) lastOutfieldPos[posMap[pos]] = pos;
+  });
 
   // Convert posMap (index-based) to name-based assignment object
   const toNames = pm => Object.fromEntries(
@@ -293,18 +299,47 @@ export function buildSchedule(players, lockGKFullGame = false) {
       const newGKIdx    = gkPerSeg[s];
       newPosMap.GK      = newGKIdx;
       const nonGKComing = comingOn.filter(i => i !== newGKIdx);
-      const nonGKVacant = vacantPos.filter(p => p !== 'GK');
-      nonGKComing.forEach((idx, k) => {
-        if (nonGKVacant[k] !== undefined) newPosMap[nonGKVacant[k]] = idx;
+      const remainVacant = new Set(vacantPos.filter(p => p !== 'GK'));
+      // Pass 1: prefer each player's previous outfield position
+      const unmatched = [];
+      nonGKComing.forEach(idx => {
+        const prev = lastOutfieldPos[idx];
+        if (prev && remainVacant.has(prev)) {
+          newPosMap[prev] = idx;
+          remainVacant.delete(prev);
+        } else {
+          unmatched.push(idx);
+        }
+      });
+      // Pass 2: assign remaining players to remaining vacant positions
+      const leftover = [...remainVacant];
+      unmatched.forEach((idx, k) => {
+        if (leftover[k] !== undefined) newPosMap[leftover[k]] = idx;
       });
     } else {
-      // Regular substitution: slot each incoming player into a vacated position
-      comingOn.forEach((idx, k) => {
-        if (vacantPos[k] !== undefined) newPosMap[vacantPos[k]] = idx;
+      // Regular substitution: prefer positional continuity
+      const remainVacant = new Set(vacantPos);
+      const unmatched = [];
+      comingOn.forEach(idx => {
+        const prev = lastOutfieldPos[idx];
+        if (prev && remainVacant.has(prev)) {
+          newPosMap[prev] = idx;
+          remainVacant.delete(prev);
+        } else {
+          unmatched.push(idx);
+        }
+      });
+      const leftover = [...remainVacant];
+      unmatched.forEach((idx, k) => {
+        if (leftover[k] !== undefined) newPosMap[leftover[k]] = idx;
       });
     }
 
     posMap = newPosMap;
+    // Update last-known outfield positions
+    OUTFIELD.forEach(pos => {
+      if (posMap[pos] !== null) lastOutfieldPos[posMap[pos]] = pos;
+    });
     segments.push({
       segIdx: s, assignment: toNames(posMap),
       bench: segBench[s].map(i => players[i]),
@@ -326,7 +361,7 @@ export function buildSchedule(players, lockGKFullGame = false) {
  * from / to are either { type:'pos', pos, name } or { type:'bench', name }.
  */
 export function applySwap(segment, { from, to }) {
-  const seg  = JSON.parse(JSON.stringify(segment)); // deep clone
+  const seg  = structuredClone(segment);
   seg.edited = true;
 
   const nameA = from.type === 'pos' ? seg.assignment[from.pos] : from.name;
