@@ -94,7 +94,8 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
     if (game.potm && totals[game.potm]) totals[game.potm].potm++;
   });
 
-  const maxMins    = Math.max(...allPlayers.map(p => totals[p]?.minutes || 0));
+  // Calculate true fairness metrics
+  const maxAvgMins = Math.max(...allPlayers.map(p => totals[p].games > 0 ? totals[p].minutes / totals[p].games : 0));
   const maxGoals   = Math.max(...allPlayers.map(p => totals[p]?.goals   || 0));
   const maxAssists = Math.max(...allPlayers.map(p => totals[p]?.assists || 0));
 
@@ -122,9 +123,9 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
         <button onClick={onBack} style={{ position: 'absolute', left: 24, top: 32, background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', borderRadius: 12, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 16, fontWeight: 800 }}>
           ← Back
         </button>
-        <div style={{ fontSize: 48, marginBottom: 8 }}>🏆</div>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>⚖️</div>
         <h1 style={{ margin: 0, fontSize: 32, fontWeight: 900, color: '#fff', letterSpacing: -0.5 }}>
-          Season Dashboard
+          Season Fairness Tracker
         </h1>
         <p style={{ margin: '8px 0 0', color: '#c7daf7', fontSize: 16, fontWeight: 600 }}>
           {seasonGames.length} Game{seasonGames.length !== 1 ? 's' : ''} Recorded
@@ -151,17 +152,18 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
         </div>
       )}
 
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px 60px' }}>
+      <div style={{ maxWidth: 1000, margin: '0 auto', padding: '24px 16px 60px' }}>
 
-        {/* ── Season Totals Leaderboard ── */}
+        {/* ── Season Totals Leaderboard (FAIRNESS FIRST) ── */}
         {allPlayers.length > 0 && (
           <div style={{ background: '#ffffff', borderRadius: 20, padding: '24px', border: '3px solid #e2ecfc', marginBottom: 32, boxShadow: '0 10px 30px rgba(15,45,90,0.05)' }}>
-            <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginBottom: 16 }}>LEADERBOARD & FAIRNESS TRACKER</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginBottom: 16 }}>FAIRNESS & ROTATION TRACKER</div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead>
                   <tr>
-                    {['Player','Games','Total Minutes','Goals','Assists','POTM','Bench','GK'].map(h => (
+                    {/* Fairness metrics brought to the front */}
+                    {['Player','Games','Mins / Game','Bench','GK Duty','Goals','Assists','POTM'].map(h => (
                       <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontWeight: 800, fontSize: 12, borderBottom: '3px solid #e2ecfc', whiteSpace: 'nowrap' }}>
                         {h}
                       </th>
@@ -170,45 +172,79 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                 </thead>
                 <tbody>
                   {allPlayers
-                    .sort((a, b) => (totals[b]?.minutes || 0) - (totals[a]?.minutes || 0))
+                    .sort((a, b) => {
+                      // Sort by average minutes so the fairest rotation sits at the top
+                      const avgA = totals[a].games > 0 ? totals[a].minutes / totals[a].games : 0;
+                      const avgB = totals[b].games > 0 ? totals[b].minutes / totals[b].games : 0;
+                      return avgB - avgA;
+                    })
                     .map(p => {
                       const t = totals[p];
+                      const avgMins = t.games > 0 ? Math.round(t.minutes / t.games) : 0;
+                      
+                      // Pull the top 3 positions this kid has played
+                      const topPositions = Object.entries(t.posCount)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 3)
+                        .map(entry => entry[0])
+                        .join(', ');
+
                       return (
                         <tr key={p}>
-                          <td style={{ padding: '12px', color: '#0f2d5a', fontWeight: 900, borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap' }}>
-                            {p}{t.potm > 0 ? ' ⭐' : ''}
+                          {/* Player & Positions */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap' }}>
+                            <div style={{ color: '#0f2d5a', fontWeight: 900, fontSize: 16 }}>{p}{t.potm > 0 ? ' ⭐' : ''}</div>
+                            <div style={{ color: '#64748b', fontWeight: 700, fontSize: 11, marginTop: 4 }}>
+                              Played: {topPositions || 'None'}
+                            </div>
                           </td>
+
+                          {/* Attendance */}
                           <td style={{ padding: '12px', color: '#64748b', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.games}</td>
                           
-                          {/* Thick Minutes Bar */}
+                          {/* TRUE Fairness Metric: Avg Minutes per Game */}
                           <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 160 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span style={{ color: '#0f2d5a', fontWeight: 800, width: 40 }}>{t.minutes}m</span>
+                              <span style={{ color: '#0f2d5a', fontWeight: 800, width: 40 }}>{avgMins}m</span>
                               <div style={{ flex: 1, height: 8, background: '#e2ecfc', borderRadius: 4 }}>
-                                <div style={{ height: '100%', borderRadius: 4, background: '#1d6fcf', width: `${maxMins > 0 ? (t.minutes / maxMins) * 100 : 0}%`, transition: 'width 0.5s' }} />
+                                <div style={{ height: '100%', borderRadius: 4, background: '#1d6fcf', width: `${maxAvgMins > 0 ? (avgMins / maxAvgMins) * 100 : 0}%`, transition: 'width 0.5s' }} />
                               </div>
                             </div>
                           </td>
 
-                          {/* Goals Bar */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 120 }}>
+                          {/* Fairness: Bench Rotation */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.benchSegs > 0 ? '#fef3c7' : '#f1f5f9', color: t.benchSegs > 0 ? '#b45309' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
+                              {t.benchSegs}
+                            </span>
+                          </td>
+
+                          {/* Fairness: GK Rotation */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.gkGames > 0 ? '#f3e8ff' : '#f1f5f9', color: t.gkGames > 0 ? '#7c3aed' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
+                              {t.gkGames}
+                            </span>
+                          </td>
+
+                          {/* Glory: Goals */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 100 }}>
                             {t.goals > 0 ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: '#d97706', fontWeight: 900, width: 24 }}>{t.goals}</span>
-                                <div style={{ flex: 1, height: 8, background: '#fef3c7', borderRadius: 4 }}>
-                                  <div style={{ height: '100%', borderRadius: 4, background: '#f59e0b', width: `${maxGoals > 0 ? (t.goals / maxGoals) * 100 : 0}%`, transition: 'width 0.5s' }} />
+                                <span style={{ color: '#d97706', fontWeight: 900, width: 20 }}>{t.goals}</span>
+                                <div style={{ flex: 1, height: 6, background: '#fef3c7', borderRadius: 3 }}>
+                                  <div style={{ height: '100%', borderRadius: 3, background: '#f59e0b', width: `${maxGoals > 0 ? (t.goals / maxGoals) * 100 : 0}%` }} />
                                 </div>
                               </div>
                             ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
                           </td>
 
-                          {/* Assists Bar */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 120 }}>
+                          {/* Glory: Assists */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 100 }}>
                             {t.assists > 0 ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: '#059669', fontWeight: 900, width: 24 }}>{t.assists}</span>
-                                <div style={{ flex: 1, height: 8, background: '#d1fae5', borderRadius: 4 }}>
-                                  <div style={{ height: '100%', borderRadius: 4, background: '#059669', width: `${maxAssists > 0 ? (t.assists / maxAssists) * 100 : 0}%`, transition: 'width 0.5s' }} />
+                                <span style={{ color: '#059669', fontWeight: 900, width: 20 }}>{t.assists}</span>
+                                <div style={{ flex: 1, height: 6, background: '#d1fae5', borderRadius: 3 }}>
+                                  <div style={{ height: '100%', borderRadius: 3, background: '#059669', width: `${maxAssists > 0 ? (t.assists / maxAssists) * 100 : 0}%` }} />
                                 </div>
                               </div>
                             ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
@@ -217,8 +253,6 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                           <td style={{ padding: '12px', color: '#d97706', fontWeight: 900, borderBottom: '1px solid #e2ecfc' }}>
                             {t.potm > 0 ? `⭐ ×${t.potm}` : <span style={{ color: '#cbd5e1' }}>—</span>}
                           </td>
-                          <td style={{ padding: '12px', color: '#64748b', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.benchSegs}</td>
-                          <td style={{ padding: '12px', color: '#7c3aed', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.gkGames}</td>
                         </tr>
                       );
                     })}
@@ -286,6 +320,9 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                                 {positions.map(pos => (
                                   <span key={pos} style={{ padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 800, background: POS_BG[pos] || '#64748b', color: POS_TEXT[pos] || '#fff', border: `1px solid ${POS_BORDER[pos] || 'transparent'}` }}>{pos}</span>
                                 ))}
+                                {sched.some(s => s === 'BENCH') && (
+                                  <span style={{ padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 900, background: '#fef3c7', color: '#b45309' }}>BENCH</span>
+                                )}
                               </div>
                             </div>
                             <div style={{ display: 'flex', gap: 12, fontWeight: 800, fontSize: 14 }}>
@@ -303,11 +340,6 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
             );
           })}
         </div>
-        
-        {/* FIX: Re-added the print helper */}
-        <p style={{ textAlign: 'center', marginTop: 40, fontSize: 14, fontWeight: 700, color: '#7a96b0' }}>
-          🖨️ Press Ctrl+P (or Cmd+P) to save this dashboard as a PDF for matchday.
-        </p>
 
       </div>
 
@@ -378,8 +410,6 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
           <div style={{ background: '#ffffff', borderRadius: 24, padding: '32px', maxWidth: 400, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', textAlign: 'center' }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>🗑️</div>
-            
-            {/* FIX: Restored the dynamic label so you know what you're deleting */}
             <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 12 }}>
               {confirmIdx === 'all' 
                 ? 'Reset Entire Season?' 
