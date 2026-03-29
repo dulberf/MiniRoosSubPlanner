@@ -38,7 +38,7 @@ export default function FieldView({ assignment, highlight, swapFrom, onPlayerCli
       borderRadius: 14, overflow: 'hidden',
       border: '4px solid #ffffff',
     }}>
-      <FieldSVG />
+	<FieldSVG orientation={orientation} />
 
       {FIELD_LAYOUT.map(({ pos, x, y }) => {
         const name    = assignment[pos];
