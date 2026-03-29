@@ -8,7 +8,7 @@ import InputView      from './components/InputView.jsx';
 import TeamSheetView  from './components/TeamSheetView.jsx';
 import SeasonView     from './components/SeasonView.jsx';
 
-import { buildSchedule, orderPlayersForGame, applySwap, calcStats } from './scheduler.js';
+import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment } from './scheduler.js';
 import { STORAGE_KEY, DEFAULT_PLAYERS } from './constants.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -43,6 +43,18 @@ export default function App() {
   const [segments,    setSegments]    = useState(null);
   const [isSaved,     setIsSaved]     = useState(false);
 
+  // ── Game clock (source of truth for live countdown timer)
+  //    segmentStartTime – Date.now() when the current period was started/resumed
+  //    accumulatedMs    – ms banked from previous start→pause cycles within this period
+  //    currentSegIdx    – which segment is actively being timed
+  //    isRunning        – true while the clock is ticking
+  const [gameClock, setGameClock] = useState({
+    segmentStartTime: null,
+    accumulatedMs:    0,
+    currentSegIdx:    null,
+    isRunning:        false,
+  });
+
   // ── Toast
   const [toast, setToast] = useState(null);
   const toastTimer         = useRef(null);
@@ -72,6 +84,7 @@ export default function App() {
     const segs = buildSchedule(players, lockGK);
     setSegments(segs);
     setIsSaved(false);
+    setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: null, isRunning: false });
     setView('result');
   }, [players, lockGK, showToast]);
 
@@ -147,6 +160,89 @@ export default function App() {
     setIsSaved(false);
     showToast('Swap applied ✓');
   }, [showToast]);
+
+  // ── Game clock controls ──────────────────────────────────────────────────
+
+  /**
+   * Start (or resume) the clock for a given segment.
+   * If segIdx differs from the current segment, the accumulated time resets
+   * (new period). If it matches, this is a resume after pause.
+   *
+   * offsetSeconds – optional number of seconds already elapsed (e.g. coach
+   *   forgot to press start and 2 minutes have passed). The segmentStartTime
+   *   is backdated by this amount so Gemini's timer math stays in sync with
+   *   the referee's clock.  On a resume (same segIdx), the offset is added
+   *   to the already-banked accumulatedMs instead.
+   */
+  const startCurrentPeriod = useCallback((segIdx, offsetSeconds = 0) => {
+    const offsetMs = Math.max(0, offsetSeconds) * 1000;
+    setGameClock(prev => {
+      const isSameSegment = prev.currentSegIdx === segIdx;
+      return {
+        segmentStartTime: Date.now() - offsetMs,
+        accumulatedMs:    isSameSegment ? prev.accumulatedMs + offsetMs : offsetMs,
+        currentSegIdx:    segIdx,
+        isRunning:        true,
+      };
+    });
+  }, []);
+
+  /**
+   * Pause the clock for the current segment. Accumulated ms are banked so
+   * resume picks up where it left off.
+   */
+  const pauseCurrentPeriod = useCallback(() => {
+    setGameClock(prev => {
+      if (!prev.isRunning || prev.segmentStartTime === null) return prev;
+      return {
+        ...prev,
+        accumulatedMs:    prev.accumulatedMs + (Date.now() - prev.segmentStartTime),
+        segmentStartTime: null,
+        isRunning:        false,
+      };
+    });
+  }, []);
+
+  /**
+   * Split the current segment at the live elapsed time and pause the clock.
+   * Returns the index of the new "future" segment (B) so the UI can
+   * immediately offer the swap interface on it.
+   *
+   * Usage from Gemini's UI:
+   *   const futureSegIdx = handleSplitSegment();
+   *   // then present swap UI targeting segments[futureSegIdx]
+   */
+  const handleSplitSegment = useCallback(() => {
+    let futureSegIdx = null;
+
+    setGameClock(prev => {
+      if (prev.currentSegIdx === null) return prev;
+
+      const elapsedMs = prev.accumulatedMs +
+        (prev.isRunning && prev.segmentStartTime ? Date.now() - prev.segmentStartTime : 0);
+      const elapsedMinutes = Math.max(1, Math.round(elapsedMs / 60000));
+
+      setSegments(prevSegs => {
+        const seg = prevSegs[prev.currentSegIdx];
+        // Clamp: can't split at 0 or at full duration
+        const clamped = Math.min(elapsedMinutes, seg.duration - 1);
+        const newSegs = splitSegment(prevSegs, prev.currentSegIdx, clamped);
+        futureSegIdx = prev.currentSegIdx + 1;
+        return newSegs;
+      });
+      setIsSaved(false);
+
+      // Pause the clock and point to the new "future" segment
+      return {
+        segmentStartTime: null,
+        accumulatedMs:    0,
+        currentSegIdx:    prev.currentSegIdx + 1,
+        isRunning:        false,
+      };
+    });
+
+    return futureSegIdx;
+  }, []);
 
   // ── Save game to season
   const handleSave = useCallback(({ label, goals, potm }) => {
@@ -265,6 +361,10 @@ export default function App() {
         onGoSetup={() => { setView('setup'); setSegments(null); }}
         isSaved={isSaved}
         toast={toast}
+        gameClock={gameClock}
+        onStartPeriod={startCurrentPeriod}
+        onPausePeriod={pauseCurrentPeriod}
+        onSplitSegment={handleSplitSegment}
       />
     );
   }

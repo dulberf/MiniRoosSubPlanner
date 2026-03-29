@@ -18,30 +18,30 @@ export const FIELD_LAYOUT = [
   { pos: 'RF', x: 70, y: 19 },
 ];
 
-// Position colour scheme — user preference, do NOT change
+// Position colour scheme — "White Rhymes with Right"
 // GK:        magenta bg, dark navy text
-// LB/LM/LF:  white bg, dark text
-// CB/CM:     light grey bg, dark text
-// RB/RM/RF:  BLACK bg, white text
+// LB/LM/LF:  BLACK bg, white text (Left)
+// CB/CM:     light grey bg, dark text (Center)
+// RB/RM/RF:  WHITE bg, dark text (Right)
 export const POS_BG = {
   GK: '#d946ef',
-  LB: '#ffffff', CB: '#b0bec5', RB: '#111827',
-  LM: '#ffffff', CM: '#b0bec5', RM: '#111827',
-  LF: '#ffffff', RF: '#111827',
+  LB: '#111827', CB: '#b0bec5', RB: '#ffffff',
+  LM: '#111827', CM: '#b0bec5', RM: '#ffffff',
+  LF: '#111827', RF: '#ffffff',
 };
 
 export const POS_TEXT = {
-  GK: '#0f2d5a',   // dark navy — NOT white
-  LB: '#0f172a', CB: '#0f172a', RB: '#ffffff',
-  LM: '#0f172a', CM: '#0f172a', RM: '#ffffff',
-  LF: '#0f172a', RF: '#ffffff',
+  GK: '#0f2d5a',   
+  LB: '#ffffff', CB: '#111827', RB: '#111827',
+  LM: '#ffffff', CM: '#111827', RM: '#111827',
+  LF: '#ffffff', RF: '#111827',
 };
 
 export const POS_BORDER = {
-  GK: '#f0abfc',
-  LB: '#94a3b8', CB: '#94a3b8', RB: '#374151',
-  LM: '#94a3b8', CM: '#94a3b8', RM: '#374151',
-  LF: '#94a3b8', RF: '#374151',
+  GK: '#0f2d5a',
+  LB: '#ffffff', CB: '#111827', RB: '#111827',
+  LM: '#ffffff', CM: '#111827', RM: '#111827',
+  LF: '#ffffff', RF: '#111827',
 };
 
 // Human-readable position labels
@@ -56,15 +56,4 @@ export const POS_LABEL = {
 export const STORAGE_KEY = 'teamsheet_season';
 
 // Default player names shown in the textarea on first load
-export const DEFAULT_PLAYERS = `Avahna
-Cara
-Clara
-Ellery
-Gen
-Grace
-Imogen
-Ivy
-Luella
-Maddy
-Lyla
-Noa`;
+export const DEFAULT_PLAYERS = `Avahna\nCara\nClara\nEllery\nGen\nGrace\nImogen\nIvy\nLuella\nMaddy\nLyla\nNoa`;

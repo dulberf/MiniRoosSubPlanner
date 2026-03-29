@@ -392,6 +392,92 @@ export function applySwap(segment, { from, to }) {
 }
 
 // ---------------------------------------------------------------------------
+// Mid-segment split (emergency / manual substitution)
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits an existing segment into two consecutive segments so that a manual
+ * substitution can be applied at an arbitrary point within the period.
+ *
+ * segments       – Segment[]  the current (possibly already-split) segment array
+ * segmentIndex   – number     index into `segments` of the segment to split
+ * elapsedMinutes – number     minutes already played in this segment (> 0, < duration)
+ *
+ * Returns a NEW array with the target segment replaced by two segments:
+ *
+ *   Segment A ("the past")
+ *     duration  = elapsedMinutes
+ *     assignment / bench / gkName  — identical to the original
+ *     locked    = true             — marks it as completed / uneditable
+ *     edited    = original.edited
+ *
+ *   Segment B ("the future")
+ *     duration  = original.duration − elapsedMinutes
+ *     assignment / bench / gkName  — deep-copied from A (starting state for the
+ *                                    upcoming swap the UI will apply via applySwap)
+ *     subBefore = true             — signals a substitution precedes this segment
+ *     locked    = false
+ *     edited    = false
+ *
+ * All segments are re-indexed (segIdx) and re-labelled so that timeline math,
+ * calcStats, and label display remain correct after the split.
+ *
+ * Throws if segmentIndex is out of range, elapsedMinutes is not strictly
+ * between 0 and the segment's duration, or the segment is already locked.
+ */
+export function splitSegment(segments, segmentIndex, elapsedMinutes) {
+  if (segmentIndex < 0 || segmentIndex >= segments.length) {
+    throw new RangeError(`segmentIndex ${segmentIndex} is out of range (0–${segments.length - 1})`);
+  }
+
+  const orig = segments[segmentIndex];
+
+  if (orig.locked) {
+    throw new Error('Cannot split a locked (already-completed) segment');
+  }
+  if (elapsedMinutes <= 0 || elapsedMinutes >= orig.duration) {
+    throw new RangeError(
+      `elapsedMinutes must be between 1 and ${orig.duration - 1} (got ${elapsedMinutes})`
+    );
+  }
+
+  const remainingMinutes = orig.duration - elapsedMinutes;
+
+  // Segment A — the completed portion
+  const segA = structuredClone(orig);
+  segA.duration = elapsedMinutes;
+  segA.locked   = true;
+
+  // Segment B — the future portion (UI will apply the swap to this one)
+  const segB = structuredClone(orig);
+  segB.duration  = remainingMinutes;
+  segB.subBefore = true;
+  segB.htBefore  = false;   // HT already handled by segment A if applicable
+  segB.locked    = false;
+  segB.edited    = false;
+
+  // Build the new array: everything before, A, B, everything after
+  const result = [
+    ...segments.slice(0, segmentIndex),
+    segA,
+    segB,
+    ...segments.slice(segmentIndex + 1),
+  ];
+
+  // Re-index and re-label every segment so timeline stays consistent
+  let elapsed = 0;
+  result.forEach((seg, i) => {
+    seg.segIdx = i;
+    const start = elapsed;
+    elapsed += seg.duration;
+    seg.half  = start >= 25 ? 2 : 1;
+    seg.label = `H${seg.half} ${start}–${elapsed}`;
+  });
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Statistics calculator
 // ---------------------------------------------------------------------------
 
