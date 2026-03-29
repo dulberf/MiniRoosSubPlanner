@@ -1,23 +1,7 @@
-/**
- * InputView — the setup screen where the coach enters player names and
- * configures the game before generating a team sheet.
- *
- * Props:
- *   playersText      – string  textarea value
- *   setPlayersText   – setter
- *   lockGK           – boolean
- *   setLockGK        – setter
- *   onGenerate       – () => void
- *   onReorder        – () => void
- *   onGoSeason       – () => void
- *   seasonGameCount  – number
- *   onImport         – (event) => void
- *   importMsg        – { type, msg } | null
- */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Toggle from './Toggle.jsx';
 import { getSegmentConfig } from '../scheduler.js';
-import { POS_LABEL } from '../constants.js';
+import { POS_LABEL, DEFAULT_PLAYERS } from '../constants.js';
 
 export default function InputView({
   playersText, setPlayersText,
@@ -26,16 +10,26 @@ export default function InputView({
   seasonGameCount,
   onImport, importMsg,
 }) {
-  const players  = useMemo(() =>
+  const [showRawText, setShowRawText] = useState(false);
+
+  // Parse current active players
+  const activePlayers = useMemo(() =>
     playersText.split('\n').map(l => l.trim()).filter(Boolean),
     [playersText]
   );
-  const count    = players.length;
+  
+  // Build a Master Roster from defaults, current text, and history (if available)
+  const masterRoster = useMemo(() => {
+    const defaults = DEFAULT_PLAYERS.split('\n').map(l => l.trim());
+    const allNames = [...defaults, ...activePlayers];
+    return [...new Set(allNames)].filter(Boolean).sort();
+  }, [activePlayers]);
+
+  const count    = activePlayers.length;
   const benchSz  = count - 9;
   const config   = getSegmentConfig(count);
   const isValid  = count >= 9 && count <= 12;
 
-  // Sub window times
   const subTimes = useMemo(() => {
     if (!config || benchSz === 0) return [];
     const times = [];
@@ -47,7 +41,17 @@ export default function InputView({
     return times;
   }, [config, benchSz]);
 
-  // Player count badge
+  const togglePlayer = (name) => {
+    const isPlaying = activePlayers.includes(name);
+    let newPlayers;
+    if (isPlaying) {
+      newPlayers = activePlayers.filter(p => p !== name);
+    } else {
+      newPlayers = [...activePlayers, name];
+    }
+    setPlayersText(newPlayers.join('\n'));
+  };
+
   const badge = count < 9  ? { text: `${count} · need ${9 - count} more`, bg: '#fee2e2', fg: '#b91c1c', border: '#f87171' }
               : count > 12 ? { text: `${count} · max 12`,                   bg: '#fef3c7', fg: '#b45309', border: '#92400e' }
               : { text: `${count} players${benchSz > 0 ? ` · ${benchSz} bench` : ' · full squad'} ✓`,
@@ -56,174 +60,150 @@ export default function InputView({
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'radial-gradient(ellipse at 50% 0%, #d6e8ff 0%, #f0f6ff 70%)',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      background: '#f0f6ff',
+      fontFamily: "system-ui, sans-serif",
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
     }}>
-      <div style={{ width: '100%', maxWidth: 440, background: '#ffffff',
+      <div style={{ width: '100%', maxWidth: 480, background: '#ffffff',
                     borderRadius: 24, overflow: 'hidden',
-                    boxShadow: '0 32px 80px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)' }}>
+                    boxShadow: '0 20px 60px rgba(15,45,90,0.1)' }}>
 
         {/* Header */}
-        <div style={{ background: 'linear-gradient(160deg, #1d6fcf 0%, #1558b0 60%, #1d6fcf 100%)',
-                      padding: '30px 28px 22px', textAlign: 'center' }}>
-          <div style={{ fontSize: 42, marginBottom: 6 }}>⚽</div>
-          <h1 style={{ margin: 0, fontSize: 23, fontWeight: 800, color: '#fff', letterSpacing: -0.5 }}>
-            Team Sheet Planner
+        <div style={{ background: 'linear-gradient(135deg, #1d6fcf 0%, #0f2d5a 100%)',
+                      padding: '32px 28px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>⚽</div>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: '#fff', letterSpacing: -0.5 }}>
+            Match Setup
           </h1>
-          <p style={{ margin: '6px 0 0', color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>
-            9v9 · 2 × 25 min · Every player gets a rest
+          <p style={{ margin: '8px 0 0', color: '#c7daf7', fontSize: 14, fontWeight: 600 }}>
+            9v9 · 2 × 25 min · Rolling Subs
           </p>
         </div>
 
         <div style={{ padding: 24 }}>
-          {/* Player count badge + label */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <label style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a', letterSpacing: 1 }}>
-              PLAYERS — ONE PER LINE
-            </label>
-            <div style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px',
-                          borderRadius: 999, background: badge.bg, color: badge.fg,
-                          border: `1px solid ${badge.border}` }}>
-              {badge.text}
-            </div>
+          
+          {/* Top Action Bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+             <button onClick={onGoSeason}
+                style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#1d6fcf', fontSize: 14, fontWeight: 800 }}>
+                📅 View Season ({seasonGameCount})
+              </button>
+              
+              <label style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#1d6fcf', fontSize: 14, fontWeight: 800, display: 'flex', alignItems: 'center' }}>
+                📥 Import
+                <input type="file" accept=".json" onChange={onImport} style={{ display: 'none' }} />
+              </label>
           </div>
 
-          {/* Textarea */}
-          <textarea
-            value={playersText}
-            onChange={e => setPlayersText(e.target.value)}
-            placeholder="One name per line..."
-            rows={12}
-            style={{ width: '100%', boxSizing: 'border-box', background: '#ffffff',
-                     border: '1.5px solid #c7daf7', borderRadius: 12,
-                     padding: '14px 16px', color: '#0f2d5a', fontSize: 15,
-                     lineHeight: 2.1, fontFamily: 'inherit', resize: 'vertical', outline: 'none' }}
-          />
-
-          <div style={{ height: 12 }} />
-
-          {/* GK toggle */}
-          <Toggle
-            value={lockGK}
-            onChange={() => setLockGK(v => !v)}
-            label="🧤 GK plays full game"
-            sublabel={lockGK
-              ? 'First player stays in goal all 50 min — does NOT rotate to bench'
-              : 'GK rotates to bench at half time, another player takes over in goal'}
-          />
-
-          {/* Game plan preview (shown when squad size is valid) */}
-          {isValid && (
-            <div style={{ marginTop: 12, background: '#ffffff', border: '1px solid #c7daf7',
-                          borderRadius: 12, padding: '12px 14px', fontSize: 12 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
-                            letterSpacing: 1, marginBottom: 10 }}>GAME PLAN PREVIEW</div>
-              {[
-                ['📐', 'Formation',  'GK · LB CB RB · LM CM RM · LF RF'],
-                ['🔄', 'Sub windows', benchSz === 0
-                  ? 'No subs needed'
-                  : subTimes.join('  ·  ')],
-                ['⏱',  'Segments',   benchSz === 0
-                  ? 'Full game, no breaks'
-                  : `${config.durs.length} periods (${config.durs.join(', ')} min)`],
-                ['🧤', 'GK',         lockGK
-                  ? 'Full 50 min in goal'
-                  : 'Rotates to bench at half time'],
-                ['⚖️', 'Field time', benchSz === 0
-                  ? 'All play 50 min'
-                  : lockGK
-                  ? `GK: 50 min · Others: ~${Math.round(400 / (count - 1))} min`
-                  : `~${Math.round(450 / count)} min each · all get a bench rest`],
-              ].map(([icon, label, value]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between',
-                                          padding: '3px 0', borderBottom: '1px solid #e2ecfc', gap: 8 }}>
-                  <span style={{ color: '#4a6b8a', flexShrink: 0 }}>{icon} {label}</span>
-                  <span style={{ color: '#4a6b8a', fontWeight: 600, textAlign: 'right' }}>{value}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Season-smart reorder button */}
-          {seasonGameCount > 0 && (
-            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10,
-                          background: '#ffffff', border: '1px solid #ddeeff',
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#1d6fcf' }}>
-                  🔀 Season-smart order
-                </div>
-                <div style={{ fontSize: 10, color: '#4a6b8a', marginTop: 1 }}>
-                  Reorder players so GK &amp; positions rotate fairly based on {seasonGameCount} saved game{seasonGameCount !== 1 ? 's' : ''}
-                </div>
-              </div>
-              <button onClick={onReorder}
-                style={{ padding: '8px 14px', background: '#ddeeff', border: '1px solid #1d6fcf',
-                         borderRadius: 8, cursor: 'pointer', color: '#1d6fcf',
-                         fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                🔀 Reorder
-              </button>
-            </div>
-          )}
-
-          {/* Import message */}
           {importMsg && (
-            <div style={{ marginBottom: 8, padding: '10px 14px', borderRadius: 10,
-                          background: importMsg.type === 'err' ? '#fee2e2' : '#ecfdf5',
-                          border: `1px solid ${importMsg.type === 'err' ? '#f87171' : '#059669'}`,
-                          color: importMsg.type === 'err' ? '#b91c1c' : '#059669',
-                          fontSize: 13, fontWeight: 700, textAlign: 'center' }}>
+            <div style={{ marginBottom: 16, padding: '12px', borderRadius: 10, background: importMsg.type === 'err' ? '#fee2e2' : '#ecfdf5', color: importMsg.type === 'err' ? '#b91c1c' : '#059669', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>
               {importMsg.msg}
             </div>
           )}
 
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button
-              onClick={onGenerate}
-              disabled={!isValid}
-              style={{ flex: 1, padding: 15,
-                       background: isValid ? 'linear-gradient(135deg, #1558b0, #1d6fcf)' : '#ddeeff',
-                       border: isValid ? 'none' : '1px solid #c7daf7',
-                       borderRadius: 12, cursor: isValid ? 'pointer' : 'not-allowed',
-                       color: isValid ? '#fff' : '#7a96b0', fontSize: 16, fontWeight: 700,
-                       boxShadow: isValid ? '0 4px 20px rgba(21,88,176,0.3)' : 'none',
-                       transition: 'all 0.2s' }}>
-              {isValid ? 'Generate Team Sheet →' : `Add ${9 - count} more player${9 - count !== 1 ? 's' : ''} to continue`}
-            </button>
-
-            {seasonGameCount > 0 && (
-              <button onClick={onGoSeason}
-                style={{ padding: '15px 14px', background: '#ffffff',
-                         border: '1px solid #059669', borderRadius: 12,
-                         cursor: 'pointer', color: '#059669', fontSize: 13, fontWeight: 700 }}>
-                📅 {seasonGameCount}
-              </button>
-            )}
-
-            <label style={{ padding: '15px 14px', background: '#ffffff',
-                            border: '1px solid #1d6fcf', borderRadius: 12,
-                            cursor: 'pointer', color: '#1d6fcf', fontSize: 13,
-                            fontWeight: 700, display: 'flex', alignItems: 'center' }}>
-              📥
-              <input type="file" accept=".json" onChange={onImport} style={{ display: 'none' }} />
-            </label>
-          </div>
-
-          {/* Position guide */}
-          <div style={{ marginTop: 16, background: '#f5f9ff', borderRadius: 12,
-                        padding: '12px 14px', border: '1px solid #e2ecfc' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
-                          letterSpacing: 1, marginBottom: 8 }}>POSITION GUIDE</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-              {Object.entries(POS_LABEL).map(([pos, label]) => (
-                <div key={pos} style={{ fontSize: 11, color: '#4a6b8a' }}>
-                  <span style={{ fontWeight: 700, color: '#0f2d5a' }}>{pos}</span> — {label}
-                </div>
-              ))}
+          {/* Player count badge */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottom: '3px solid #e2ecfc' }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: '#0f2d5a', letterSpacing: 0.5 }}>
+              TODAY'S SQUAD
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 800, padding: '6px 14px',
+                          borderRadius: 999, background: badge.bg, color: badge.fg,
+                          border: `2px solid ${badge.border}` }}>
+              {badge.text}
             </div>
           </div>
+
+          {/* FAT FINGER ROSTER TOGGLES */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
+            {masterRoster.map(name => {
+              const isPlaying = activePlayers.includes(name);
+              return (
+                <button 
+                  key={name}
+                  onClick={() => togglePlayer(name)}
+                  style={{
+                    flex: '1 1 calc(33% - 10px)', minWidth: 100,
+                    padding: '12px 8px', borderRadius: 12,
+                    border: `3px solid ${isPlaying ? '#059669' : '#cbd5e1'}`,
+                    background: isPlaying ? '#ecfdf5' : '#f8fafc',
+                    color: isPlaying ? '#065f46' : '#64748b',
+                    fontSize: 16, fontWeight: 800, cursor: 'pointer',
+                    transition: 'all 0.1s',
+                    boxShadow: isPlaying ? '0 4px 12px rgba(5,150,105,0.15)' : 'none'
+                  }}
+                >
+                  {isPlaying ? '✅' : '❌'} {name}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Hidden Raw Text Toggle for new players */}
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <button onClick={() => setShowRawText(!showRawText)} style={{ background: 'none', border: 'none', color: '#7a96b0', fontSize: 13, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}>
+              {showRawText ? 'Hide Raw List' : '✏️ Add New Player / Edit Raw List'}
+            </button>
+          </div>
+
+          {showRawText && (
+             <textarea
+              value={playersText}
+              onChange={e => setPlayersText(e.target.value)}
+              placeholder="One name per line..."
+              rows={8}
+              style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', border: '3px solid #cbd5e1', borderRadius: 12, padding: '16px', color: '#0f2d5a', fontSize: 16, fontWeight: 600, lineHeight: 1.8, fontFamily: 'inherit', resize: 'vertical', outline: 'none', marginBottom: 20 }}
+            />
+          )}
+
+          {/* GK toggle */}
+          <div style={{ background: '#f8fafc', border: '3px solid #e2ecfc', borderRadius: 16, padding: '4px 8px', marginBottom: 16 }}>
+            <Toggle
+              value={lockGK}
+              onChange={() => setLockGK(v => !v)}
+              label="🧤 GK plays full game"
+              sublabel={lockGK
+                ? 'GK stays in goal all 50 min'
+                : 'GK rotates to bench at half time'}
+            />
+          </div>
+
+          {/* Game plan preview */}
+          {isValid && (
+            <div style={{ background: '#fffbeb', border: '3px solid #fcd34d', borderRadius: 16, padding: '16px', fontSize: 14, marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: '#b45309', letterSpacing: 1, marginBottom: 12 }}>GAME PLAN PREVIEW</div>
+              {[
+                ['🔄', 'Subs', benchSz === 0 ? 'No subs needed' : subTimes.join('  ·  ')],
+                ['⚖️', 'Time', benchSz === 0 ? 'All play 50 min' : lockGK ? `GK: 50m · Others: ~${Math.round(400 / (count - 1))}m` : `~${Math.round(450 / count)}m each`],
+              ].map(([icon, label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '2px solid #fde68a', gap: 8 }}>
+                  <span style={{ color: '#92400e', fontWeight: 800 }}>{icon} {label}</span>
+                  <span style={{ color: '#b45309', fontWeight: 700, textAlign: 'right' }}>{value}</span>
+                </div>
+              ))}
+              
+              {/* Season-smart reorder button inside preview */}
+              {seasonGameCount > 0 && (
+                <button onClick={onReorder} style={{ width: '100%', marginTop: 16, padding: '12px', background: '#fef3c7', border: '3px solid #f59e0b', borderRadius: 12, cursor: 'pointer', color: '#b45309', fontSize: 14, fontWeight: 800 }}>
+                  🔀 BALANCE POSITIONS FROM HISTORY
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <button
+            onClick={onGenerate}
+            disabled={!isValid}
+            style={{ width: '100%', padding: 20,
+                     background: isValid ? '#1d6fcf' : '#e2ecfc',
+                     border: isValid ? 'none' : '3px solid #cbd5e1',
+                     borderRadius: 16, cursor: isValid ? 'pointer' : 'not-allowed',
+                     color: isValid ? '#fff' : '#64748b', fontSize: 20, fontWeight: 900,
+                     boxShadow: isValid ? '0 8px 24px rgba(29,111,207,0.3)' : 'none',
+                     transition: 'all 0.2s' }}>
+            {isValid ? 'GENERATE TACTICAL BOARD →' : `ADD ${9 - count} MORE PLAYERS`}
+          </button>
+
         </div>
       </div>
     </div>

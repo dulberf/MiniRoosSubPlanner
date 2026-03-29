@@ -3,7 +3,6 @@ import FieldView from './FieldView.jsx';
 import { calcStats } from '../scheduler.js';
 import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER } from '../constants.js';
 
-// ... (Helper functions remain unchanged)
 function getStartMin(segments, idx) {
   let t = 0;
   for (let i = 0; i < idx; i++) t += segments[i].duration;
@@ -47,7 +46,13 @@ export default function TeamSheetView({
   const [activePlayer, setActivePlayer] = useState(null); 
   const [matchStats, setMatchStats] = useState({}); 
   const [orientation, setOrientation] = useState('vertical'); 
-  const [showScript, setShowScript] = useState(false);
+  
+  const [scriptModal, setScriptModal] = useState(null); 
+
+  // FIX: Restore Save Modal State
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [matchLabel, setMatchLabel] = useState('');
+  const [potm, setPotm] = useState('');
 
   const [now, setNow] = useState(Date.now());
   const [showClockMenu, setShowClockMenu] = useState(false);
@@ -71,20 +76,18 @@ export default function TeamSheetView({
     let sAssists = 0;
     if (seasonGames && seasonGames.length > 0) {
       seasonGames.forEach(game => {
-        if (game.stats && game.stats[playerName]) {
-          sGoals += (game.stats[playerName].goals || 0);
-          sAssists += (game.stats[playerName].assists || 0);
-        }
+        if (game.goals && game.goals[playerName]) sGoals += game.goals[playerName];
+        if (game.assists && game.assists[playerName]) sAssists += game.assists[playerName];
       });
     }
+    sGoals += (matchStats[playerName]?.goals || 0);
+    sAssists += (matchStats[playerName]?.assists || 0);
     return { sGoals, sAssists };
   };
 
-  // --- TIMER MATH & AUTO-ROLLOVER ---
   useEffect(() => {
     let interval;
     if (gameClock.isRunning) {
-      // Tick every 500ms for tighter rollover detection
       interval = setInterval(() => setNow(Date.now()), 500);
     } else {
       setNow(Date.now());
@@ -92,28 +95,37 @@ export default function TeamSheetView({
     return () => clearInterval(interval);
   }, [gameClock.isRunning]);
 
-  // Make the header clock look at the ACTIVE game segment, not just the tab we are looking at
   const activeSegIdx = gameClock.currentSegIdx !== null ? gameClock.currentSegIdx : currentSeg;
   const activeSeg = segments[activeSegIdx];
   
   const elapsedMs = gameClock.accumulatedMs + (gameClock.isRunning && gameClock.segmentStartTime ? now - gameClock.segmentStartTime : 0);
   const remainingMsTotal = activeSeg ? (activeSeg.duration * 60000) - elapsedMs : 0;
   
-  // The Auto-Advance Trigger
   useEffect(() => {
     if (gameClock.isRunning && remainingMsTotal <= 0) {
       onAdvanceSegment?.();
     }
   }, [remainingMsTotal, gameClock.isRunning, onAdvanceSegment]);
 
-  // Snap the UI to the new segment when the engine rolls over
   useEffect(() => {
     if (gameClock.currentSegIdx !== null && gameClock.currentSegIdx !== currentSeg) {
-      setCurrentSeg(gameClock.currentSegIdx);
+      const nextIdx = gameClock.currentSegIdx;
+      setCurrentSeg(nextIdx);
       setEditMode(false);
       setSwapFrom(null);
+
+      if (nextIdx > 0 && nextIdx > currentSeg) {
+        const activeChanges = getSubChanges(segments[nextIdx - 1], segments[nextIdx])
+          .filter(c => c.type === 'sub')
+          .map(c => ({ pos: c.pos, on: c.on, off: c.off }));
+        
+        setScriptModal({
+          title: `⏱️ Period ${nextIdx + 1} Started! Call these subs:`,
+          subs: activeChanges
+        });
+      }
     }
-  }, [gameClock.currentSegIdx]); // Intentionally omitting currentSeg to avoid loop
+  }, [gameClock.currentSegIdx]);
 
   const remainingSecsTotal = Math.max(0, Math.floor(remainingMsTotal / 1000));
   const remMins = Math.floor(remainingSecsTotal / 60);
@@ -124,8 +136,6 @@ export default function TeamSheetView({
   const clockColor = isCritical ? '#dc2626' : isWarning ? '#d97706' : '#059669';
   const clockBg = isCritical ? '#fee2e2' : isWarning ? '#fffbeb' : '#ecfdf5';
 
-  // --- HISTORICAL LOCK RULE ---
-  // Locked if engine split it, OR if it's a past segment.
   const isEffectivelyLocked = seg?.locked || (gameClock.currentSegIdx !== null && currentSeg < gameClock.currentSegIdx);
 
   const updateStat = (player, type, delta) => {
@@ -186,7 +196,6 @@ export default function TeamSheetView({
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#fff', borderBottom: '3px solid #c7daf7' }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0f2d5a' }}>⚽ {players.length} Players | {benchSize} Bench</h1>
         
-        {/* SMART HEADER CLOCK */}
         <div style={{ position: 'relative' }}>
           <button 
             onClick={() => setShowClockMenu(!showClockMenu)}
@@ -200,7 +209,6 @@ export default function TeamSheetView({
             {gameClock.currentSegIdx !== null ? `${remMins.toString().padStart(2, '0')}:${remSecs.toString().padStart(2, '0')}` : `${activeSeg.duration}:00`}
           </button>
 
-          {/* INTUITIVE CLOCK MENU */}
           {showClockMenu && (
             <div style={{ position: 'absolute', top: '110%', left: '50%', transform: 'translateX(-50%)', background: '#fff', border: '3px solid #1d6fcf', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 200, minWidth: 260 }}>
               
@@ -266,7 +274,7 @@ export default function TeamSheetView({
             </div>
 
             {currentSeg < segments.length - 1 && !editMode && !isEffectivelyLocked && (
-              <button onClick={() => setShowScript(true)} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fffbeb', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
+              <button onClick={() => setScriptModal({ title: '📋 Next Sub Script', subs: upcomingSubs })} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fffbeb', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
                 📋 READ NEXT SUB SCRIPT
               </button>
             )}
@@ -336,20 +344,59 @@ export default function TeamSheetView({
         );
       })()}
 
-      {/* ── Coach's Script Modal ── */}
-      {showScript && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200, padding: 20 }}>
-          <div style={{ background: '#fff', padding: 32, borderRadius: 24, width: '100%', maxWidth: 600 }}>
-            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginBottom: 20 }}>📋 Next Sub Script</h2>
+      {/* ── UNIFIED Coach's Script Modal ── */}
+      {scriptModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200, padding: 20 }}>
+          <div style={{ background: '#fff', padding: 32, borderRadius: 24, width: '100%', maxWidth: 600, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 20 }}>{scriptModal.title}</h2>
             <ul style={{ fontSize: 20, fontWeight: 700, color: '#4a6b8a', lineHeight: 1.8, listStyle: 'none', padding: 0 }}>
-              {upcomingSubs.map((sub, idx) => (
+              {scriptModal.subs.map((sub, idx) => (
                 <li key={idx} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '2px solid #e2ecfc' }}>
                   <span style={{ color: '#059669' }}>{sub.on}</span> you are on for <span style={{ color: '#dc2626' }}>{sub.off || 'nobody'}</span> at <strong>{sub.pos}</strong>.
                 </li>
               ))}
-              {upcomingSubs.length === 0 && <li>No substitutions queued.</li>}
+              {scriptModal.subs.length === 0 && <li>No substitutions required.</li>}
             </ul>
-            <button onClick={() => setShowScript(false)} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', marginTop: 16 }}>Got It</button>
+            <button onClick={() => setScriptModal(null)} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', marginTop: 16 }}>Got It</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── FIX: Restored Post-Game Save Modal ── */}
+      {saveOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 300, padding: 20 }}>
+          <div style={{ background: '#fff', padding: 32, borderRadius: 24, width: '100%', maxWidth: 500, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 24 }}>📊 Post-Game Summary</h2>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4a6b8a', marginBottom: 8, letterSpacing: 1 }}>MATCH LABEL (OPTIONAL)</label>
+              <input value={matchLabel} onChange={e => setMatchLabel(e.target.value)} placeholder="e.g. Grand Final vs Eastside" style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 600, boxSizing: 'border-box', outline: 'none' }} />
+            </div>
+
+            <div style={{ marginBottom: 32 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4a6b8a', marginBottom: 8, letterSpacing: 1 }}>⭐ PLAYER OF THE WEEK</label>
+              <select value={potm} onChange={e => setPotm(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 600, boxSizing: 'border-box', background: '#fff', outline: 'none', cursor: 'pointer' }}>
+                <option value="">— Select Player —</option>
+                {players.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setSaveOpen(false)} style={{ flex: 1, padding: 20, borderRadius: 12, background: '#f1f5f9', color: '#64748b', fontSize: 16, fontWeight: 800, border: 'none', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => {
+                const formattedGoals = {};
+                const formattedAssists = {};
+                Object.entries(matchStats).forEach(([p, stats]) => {
+                  if (stats.goals && stats.goals > 0) formattedGoals[p] = stats.goals;
+                  if (stats.assists && stats.assists > 0) formattedAssists[p] = stats.assists;
+                });
+                onSave({ label: matchLabel, potm, goals: formattedGoals, assists: formattedAssists });
+                setSaveOpen(false);
+                onGoSeason();
+              }} style={{ flex: 2, padding: 20, borderRadius: 12, background: '#059669', color: '#fff', fontSize: 16, fontWeight: 900, border: 'none', cursor: 'pointer' }}>
+                💾 Save Game
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -357,12 +404,9 @@ export default function TeamSheetView({
       {/* ── 5. Post-Game Footer ── */}
       <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7' }}>
         <button 
-          onClick={() => { 
-            onSave({ stats: matchStats }); 
-            onGoSeason(); 
-          }} 
+          onClick={() => setSaveOpen(true)} 
           style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
-          📊 SAVE GAME & VIEW SEASON TRACKER
+          📊 REVIEW & SAVE GAME
         </button>
       </footer>
     </div>
