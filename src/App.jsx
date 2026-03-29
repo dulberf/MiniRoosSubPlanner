@@ -55,6 +55,10 @@ export default function App() {
     isRunning:        false,
   });
 
+  // Ref for segments so clock callbacks always read the latest value
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+
   // ── Toast
   const [toast, setToast] = useState(null);
   const toastTimer         = useRef(null);
@@ -162,25 +166,29 @@ export default function App() {
   }, [showToast]);
 
   // ── Game clock controls ──────────────────────────────────────────────────
+  //
+  // The clock is per-SEGMENT but auto-rolls to the next segment when the
+  // countdown reaches zero, without pausing.  It only stops at a half-time
+  // boundary (next segment has htBefore === true) or end of game.
+  //
+  // Gemini's setInterval computes the countdown and calls advanceSegment()
+  // when it hits zero.  The overshoot is carried forward so there's no drift.
 
   /**
    * Start (or resume) the clock for a given segment.
-   * If segIdx differs from the current segment, the accumulated time resets
-   * (new period). If it matches, this is a resume after pause.
    *
-   * offsetSeconds – optional number of seconds already elapsed (e.g. coach
-   *   forgot to press start and 2 minutes have passed). The segmentStartTime
-   *   is backdated by this amount so Gemini's timer math stays in sync with
-   *   the referee's clock.  On a resume (same segIdx), the offset is added
-   *   to the already-banked accumulatedMs instead.
+   * offsetSeconds – signed offset in seconds.  Positive = time already
+   *   elapsed (coach was late pressing start).  Negative = rewind
+   *   (jumped ahead by accident).  The segmentStartTime is shifted so
+   *   Gemini's elapsed-time math stays in sync with the referee.
    */
   const startCurrentPeriod = useCallback((segIdx, offsetSeconds = 0) => {
-    const offsetMs = Math.max(0, offsetSeconds) * 1000;
+    const offsetMs = offsetSeconds * 1000;
     setGameClock(prev => {
       const isSameSegment = prev.currentSegIdx === segIdx;
       return {
         segmentStartTime: Date.now() - offsetMs,
-        accumulatedMs:    isSameSegment ? prev.accumulatedMs + offsetMs : offsetMs,
+        accumulatedMs:    isSameSegment ? Math.max(0, prev.accumulatedMs + offsetMs) : Math.max(0, offsetMs),
         currentSegIdx:    segIdx,
         isRunning:        true,
       };
@@ -188,8 +196,8 @@ export default function App() {
   }, []);
 
   /**
-   * Pause the clock for the current segment. Accumulated ms are banked so
-   * resume picks up where it left off.
+   * Pause the clock.  Only stops at half-time or end of game — Gemini
+   * should NOT call this between segments within a half.
    */
   const pauseCurrentPeriod = useCallback(() => {
     setGameClock(prev => {
@@ -204,13 +212,92 @@ export default function App() {
   }, []);
 
   /**
+   * Nudge the running clock forward or backward by `deltaSeconds`.
+   * Positive = add time (clock jumps ahead), negative = subtract.
+   * Works whether the clock is running or paused.
+   */
+  const nudgeClock = useCallback((deltaSeconds) => {
+    const deltaMs = deltaSeconds * 1000;
+    setGameClock(prev => {
+      if (prev.currentSegIdx === null) return prev;
+      return {
+        ...prev,
+        accumulatedMs: Math.max(0, prev.accumulatedMs + deltaMs),
+      };
+    });
+  }, []);
+
+  /**
+   * Auto-advance to the next segment.  Gemini's setInterval should call
+   * this when the per-segment countdown reaches zero.
+   *
+   * Carries the overshoot (ms past the boundary) into the next segment so
+   * the continuous clock doesn't drift.  Automatically pauses if the next
+   * segment is a half-time boundary or the game is over.
+   */
+  const advanceSegment = useCallback(() => {
+    setGameClock(prev => {
+      if (prev.currentSegIdx === null) return prev;
+      const segs = segmentsRef.current;
+      if (!segs) return prev;
+
+      const seg = segs[prev.currentSegIdx];
+      const segDurationMs = seg.duration * 60000;
+
+      // Compute how far past the segment boundary we are
+      const elapsedMs = prev.accumulatedMs +
+        (prev.isRunning && prev.segmentStartTime ? Date.now() - prev.segmentStartTime : 0);
+      const overshootMs = Math.max(0, elapsedMs - segDurationMs);
+
+      const nextIdx = prev.currentSegIdx + 1;
+
+      // Stop at end of game or half-time boundary
+      if (nextIdx >= segs.length || segs[nextIdx].htBefore) {
+        return {
+          segmentStartTime: null,
+          accumulatedMs:    0,
+          currentSegIdx:    prev.currentSegIdx,
+          isRunning:        false,
+        };
+      }
+
+      // Roll into the next segment, carrying the overshoot
+      return {
+        segmentStartTime: Date.now(),
+        accumulatedMs:    overshootMs,
+        currentSegIdx:    nextIdx,
+        isRunning:        true,
+      };
+    });
+  }, []);
+
+  /**
+   * Zero out the running clock (e.g. coach started it by accident).
+   * Keeps currentSegIdx so the UI stays on the same segment.
+   */
+  const resetClock = useCallback(() => {
+    setGameClock(prev => ({
+      segmentStartTime: null,
+      accumulatedMs:    0,
+      currentSegIdx:    prev.currentSegIdx,
+      isRunning:        false,
+    }));
+  }, []);
+
+  /**
+   * Total wipe — back to the setup screen, clear segments and clock.
+   */
+  const resetGame = useCallback(() => {
+    setSegments(null);
+    setIsSaved(false);
+    setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: null, isRunning: false });
+    setView('setup');
+  }, []);
+
+  /**
    * Split the current segment at the live elapsed time and pause the clock.
    * Returns the index of the new "future" segment (B) so the UI can
    * immediately offer the swap interface on it.
-   *
-   * Usage from Gemini's UI:
-   *   const futureSegIdx = handleSplitSegment();
-   *   // then present swap UI targeting segments[futureSegIdx]
    */
   const handleSplitSegment = useCallback(() => {
     let futureSegIdx = null;
@@ -224,7 +311,6 @@ export default function App() {
 
       setSegments(prevSegs => {
         const seg = prevSegs[prev.currentSegIdx];
-        // Clamp: can't split at 0 or at full duration
         const clamped = Math.min(elapsedMinutes, seg.duration - 1);
         const newSegs = splitSegment(prevSegs, prev.currentSegIdx, clamped);
         futureSegIdx = prev.currentSegIdx + 1;
@@ -364,6 +450,10 @@ export default function App() {
         gameClock={gameClock}
         onStartPeriod={startCurrentPeriod}
         onPausePeriod={pauseCurrentPeriod}
+        onNudgeClock={nudgeClock}
+        onAdvanceSegment={advanceSegment}
+        onResetClock={resetClock}
+        onResetGame={resetGame}
         onSplitSegment={handleSplitSegment}
       />
     );
