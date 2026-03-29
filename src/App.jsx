@@ -83,7 +83,7 @@ export default function App() {
 
   // ── Generate team sheet
   const handleGenerate = useCallback(() => {
-    if (players.length < 9) { showToast('Need at least 9 players!', 'err'); return; }
+    if (players.length < 6) { showToast('Need at least 6 players!', 'err'); return; }
     if (players.length > 12) { showToast('Maximum 12 players.', 'err'); return; }
     const segs = buildSchedule(players, lockGK);
     setSegments(segs);
@@ -97,7 +97,7 @@ export default function App() {
     if (seasonGames.length === 0) return;
     const reordered = orderPlayersForGame(players, seasonGames, lockGK);
     setPlayersText(reordered.join('\n'));
-    if (reordered.length >= 9 && reordered.length <= 12) {
+    if (reordered.length >= 6 && reordered.length <= 12) {
       setSegments(buildSchedule(reordered, lockGK));
       setIsSaved(false);
       if (view === 'setup') setView('result');
