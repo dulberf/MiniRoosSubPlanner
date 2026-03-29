@@ -267,7 +267,6 @@ export default function TeamSheetView({
                       🪑 {name}
                       {subTo && !editMode && <span style={{ fontSize: 13, background: '#059669', color: '#fff', padding: '4px 8px', borderRadius: 6, marginLeft: 12 }}>▲ TO {subTo.pos}</span>}
                     </div>
-                    <span style={{ fontSize: 16, color: '#64748b' }}>{minutesMap[name] || 0}m</span>
                   </div>
                 );
               })}
