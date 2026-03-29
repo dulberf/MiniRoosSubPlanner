@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MiniRoos Tactical Board Mockup v3</title>
+<style>
+  :root {
+    --bg-page: #f0f6ff;
+    --text-main: #0f2d5a;
+    --green-pitch: #16a34a;
+    --white: #ffffff;
+    --black: #111827;
+    --grey: #b0bec5;
+    --magenta: #d946ef;
+  }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-page);
+    color: var(--text-main);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  
+  /* --- 1. Top Header --- */
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 24px; background-color: var(--white); border-bottom: 2px solid #e2ecfc;
+  }
+  .match-label { font-size: 20px; font-weight: 800; }
+  .timer { 
+    font-size: 24px; font-weight: 900; color: #d97706; 
+    background: #fffbeb; padding: 6px 20px; border: 3px solid #f59e0b; border-radius: 8px; 
+  }
+  .btn-options { 
+    padding: 10px 20px; font-size: 16px; font-weight: 800; 
+    background: #e2ecfc; border: 3px solid #1d6fcf; border-radius: 8px; color: #1d6fcf; cursor: pointer; 
+  }
+
+  /* --- 2. Chunky Timeline --- */
+  .timeline {
+    display: flex; gap: 12px; padding: 12px 24px;
+    background: var(--white); border-bottom: 3px solid #c7daf7;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .timeline-btn {
+    padding: 12px 20px; font-size: 15px; font-weight: 800;
+    border: 3px solid #c7daf7; border-radius: 8px;
+    background: #f8fafc; color: #4a6b8a; cursor: pointer;
+  }
+  .timeline-btn.active { background: #1d6fcf; color: var(--white); border-color: #1558b0; }
+  .timeline-btn.ht { border-color: #f59e0b; color: #b45309; background: #fffbeb; }
+
+  main { display: flex; flex: 1; overflow: hidden; }
+  
+  /* --- 3. Action Panel (Left 35%) --- */
+  .action-panel {
+    width: 35%; padding: 20px; display: flex; flex-direction: column;
+    border-right: 3px solid #c7daf7; background: #f8fafc;
+  }
+  .bench-header { 
+    font-size: 16px; font-weight: 900; color: #4a6b8a; letter-spacing: 1px; margin-bottom: 12px; 
+  }
+  .bench-list { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  
+  .bench-card { 
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px; background: var(--white); 
+    border: 4px solid #cbd5e1; border-radius: 12px;
+    font-size: 20px; font-weight: 800; cursor: pointer;
+  }
+  .bench-card.active { border-color: #1d6fcf; background: #eff6ff; color: #1558b0; }
+  .bench-mins { font-size: 16px; color: #64748b; font-weight: 700; }
+  
+  /* Bench Indicator Badge */
+  .badge-bench-sub {
+    font-size: 13px; font-weight: 900; background: #059669; color: var(--white);
+    padding: 4px 8px; border-radius: 6px; margin-left: 12px; vertical-align: middle;
+  }
+
+  .btn-sub {
+    margin-top: 16px; padding: 20px; font-size: 18px; font-weight: 900;
+    background: #1d6fcf; color: var(--white); border: 4px solid #1558b0; 
+    border-radius: 12px; cursor: pointer; text-transform: uppercase;
+  }
+
+  /* --- 4. The Pitch (Right 65%) --- */
+  .pitch-container {
+    width: 65%; padding: 24px; background: #e2ecfc; 
+    display: flex; justify-content: center; align-items: stretch;
+  }
+  .pitch {
+    flex: 1; max-width: 650px; background: var(--green-pitch);
+    border: 6px solid var(--white); border-radius: 16px; position: relative;
+    background-image: linear-gradient(to bottom, transparent 49.5%, rgba(255,255,255,0.5) 49.5%, rgba(255,255,255,0.5) 50.5%, transparent 50.5%);
+  }
+
+  /* Tokens & Wristband Rules */
+  .token {
+    position: absolute; transform: translate(-50%, -50%);
+    width: 72px; height: 72px; border-radius: 50%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    font-weight: 900; border: 4px solid; cursor: pointer;
+  }
+  .token-pos { font-size: 13px; margin-bottom: -2px; opacity: 0.9; }
+  .token-name { font-size: 16px; letter-spacing: 0.5px; }
+
+  /* Field Incoming Sub Badge */
+  .badge-field-sub {
+    position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%);
+    background: #059669; color: var(--white); border: 3px solid var(--white);
+    font-size: 14px; font-weight: 900; padding: 2px 10px; border-radius: 12px;
+    white-space: nowrap; z-index: 10;
+  }
+
+  /* Color mappings */
+  .left-side { background: var(--black); color: var(--white); border-color: var(--white); }
+  .right-side { background: var(--white); color: var(--black); border-color: var(--black); }
+  .center-side { background: var(--grey); color: var(--black); border-color: var(--black); }
+  .gk-side { background: var(--magenta); color: var(--black); border-color: var(--black); }
+
+  /* Positions */
+  .pos-lf { top: 20%; left: 30%; }
+  .pos-rf { top: 20%; left: 70%; }
+  .pos-lm { top: 45%; left: 20%; }
+  .pos-cm { top: 45%; left: 50%; }
+  .pos-rm { top: 45%; left: 80%; }
+  .pos-lb { top: 70%; left: 20%; }
+  .pos-cb { top: 70%; left: 50%; }
+  .pos-rb { top: 70%; left: 80%; }
+  .pos-gk { top: 90%; left: 50%; }
+
+  /* --- 5. Post-Game Footer --- */
+  footer {
+    padding: 16px 24px; background: var(--white); border-top: 3px solid #c7daf7;
+  }
+  .btn-stats {
+    width: 100%; padding: 16px; font-size: 18px; font-weight: 900;
+    background: #f8fafc; color: #4a6b8a; border: 4px solid #cbd5e1; 
+    border-radius: 8px; cursor: pointer; text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="match-label">⚽ VS Eastside FC</div>
+    <div class="timer">⏱️ 12:45</div>
+    <button class="btn-options">Options</button>
+  </header>
+
+  <div class="timeline">
+    <button class="timeline-btn">Period 1</button>
+    <button class="timeline-btn active">Period 2 (12:45)</button>
+    <button class="timeline-btn">Period 3</button>
+    <button class="timeline-btn ht">⏸ Half Time</button>
+    <button class="timeline-btn">Period 4</button>
+    <button class="timeline-btn">Period 5</button>
+  </div>
+
+  <main>
+    <div class="action-panel">
+      <div class="bench-header">THE BENCH (3)</div>
+      <div class="bench-list">
+        <div class="bench-card active">
+          <div>🪑 Liam <span class="badge-bench-sub">▲ TO LB</span></div>
+          <span class="bench-mins">15m</span>
+        </div>
+        <div class="bench-card">
+          <span>🪑 Noah</span>
+          <span class="bench-mins">15m</span>
+        </div>
+        <div class="bench-card">
+          <span>🪑 Ethan</span>
+          <span class="bench-mins">0m</span>
+        </div>
+      </div>
+      <button class="btn-sub">🔄 ENTER EDIT MODE</button>
+    </div>
+
+    <div class="pitch-container">
+      <div class="pitch">
+        <div class="token left-side pos-lf"><span class="token-pos">LF</span><span class="token-name">Toby</span></div>
+        <div class="token right-side pos-rf"><span class="token-pos">RF</span><span class="token-name">Zac</span></div>
+        <div class="token left-side pos-lm"><span class="token-pos">LM</span><span class="token-name">Finn</span></div>
+        <div class="token center-side pos-cm"><span class="token-pos">CM</span><span class="token-name">Eli</span></div>
+        <div class="token right-side pos-rm"><span class="token-pos">RM</span><span class="token-name">Hugo</span></div>
+        
+        <div class="token left-side pos-lb" style="border-color: #dc2626; border-style: dashed;">
+          <span class="token-pos">LB</span><span class="token-name" style="text-decoration: line-through; opacity: 0.7;">Jack</span>
+          <div class="badge-field-sub">▲ IN: Liam</div>
+        </div>
+
+        <div class="token center-side pos-cb"><span class="token-pos">CB</span><span class="token-name">Leo</span></div>
+        <div class="token right-side pos-rb"><span class="token-pos">RB</span><span class="token-name">Max</span></div>
+        <div class="token gk-side pos-gk"><span class="token-pos">GK</span><span class="token-name">Sam</span></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <button class="btn-stats">📊 POST-GAME STATS & SEASON TRACKER</button>
+  </footer>
+
+</body>
+</html>

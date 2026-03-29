@@ -2,7 +2,7 @@
   "name": "Team Sheet Planner",
   "short_name": "Team Sheet",
   "description": "Football substitution planner for MiniRoos",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#f0f6ff",
   "theme_color": "#1a6b2e",
