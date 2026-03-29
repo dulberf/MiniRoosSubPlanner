@@ -1,0 +1,18 @@
+{
+  "name": "Team Sheet Planner",
+  "short_name": "Team Sheet",
+  "description": "Football substitution planner for MiniRoos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f6ff",
+  "theme_color": "#1a6b2e",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
