@@ -246,4 +246,125 @@ export default function TeamSheetView({
       <main style={{ display: 'flex', flex: 1, overflow: 'hidden', padding: 16, gap: 16, flexDirection: isKidsView ? 'column' : 'row' }}>
         {/* Bench Panel */}
         {(!isKidsView || editMode) && (
-          <div style={{ width: isKidsView ? '100%' : '35%', display: 'flex', flexDirection: 'column', gap
+          <div style={{ width: isKidsView ? '100%' : '35%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: '#4a6b8a', letterSpacing: 1 }}>THE BENCH</div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {seg.bench.map(name => {
+                const subTo = upcomingSubs.find(s => s.on === name);
+                const isSel = editMode && swapFrom?.type === 'bench' && swapFrom.name === name;
+                return (
+                  <div key={name} onClick={() => handleBenchClick(name)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, background: isSel ? '#eff6ff' : '#fff', border: `4px solid ${isSel ? '#1d6fcf' : '#cbd5e1'}`, borderRadius: 12, fontSize: 20, fontWeight: 800, cursor: isEffectivelyLocked ? 'default' : 'pointer', opacity: isEffectivelyLocked ? 0.7 : 1 }}>
+                    <div>
+                      🪑 {name}
+                      {subTo && !editMode && <span style={{ fontSize: 13, background: '#059669', color: '#fff', padding: '4px 8px', borderRadius: 6, marginLeft: 12 }}>▲ TO {subTo.pos}</span>}
+                    </div>
+                    <span style={{ fontSize: 16, color: '#64748b' }}>{minutesMap[name] || 0}m</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {currentSeg < segments.length - 1 && !editMode && !isEffectivelyLocked && (
+              <button onClick={() => setShowScript(true)} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fffbeb', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
+                📋 READ NEXT SUB SCRIPT
+              </button>
+            )}
+
+            {!isEffectivelyLocked && (
+              <button onClick={editMode ? () => setEditMode(false) : handleEmergencySub} style={{ padding: 20, fontSize: 18, fontWeight: 900, background: editMode ? '#1d6fcf' : '#059669', color: '#fff', border: `4px solid ${editMode ? '#1558b0' : '#047857'}`, borderRadius: 12, cursor: 'pointer' }}>
+                {editMode ? '✅ FINISH EDITING' : (gameClock.isRunning && gameClock.currentSegIdx === currentSeg ? '🚨 EMERGENCY MID-PERIOD SUB' : '🔄 EDIT LINEUP')}
+              </button>
+            )}
+            {isEffectivelyLocked && (
+               <div style={{ padding: 16, textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#64748b', background: '#f1f5f9', borderRadius: 12, border: '2px dashed #cbd5e1' }}>
+                 🔒 This period is completed and cannot be edited.
+               </div>
+            )}
+          </div>
+        )}
+
+        {/* The Pitch */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#e2ecfc', borderRadius: 16, padding: 16 }}>
+          {isKidsView && (
+             <button onClick={() => setOrientation(o => o === 'horizontal-right' ? 'horizontal-left' : 'horizontal-right')} style={{ marginBottom: 16, padding: '10px 20px', fontSize: 16, fontWeight: 800, background: '#fff', border: '3px solid #cbd5e1', borderRadius: 8, cursor: 'pointer' }}>
+               {orientation === 'horizontal-right' ? '⬅️ Attacking Left' : 'Attacking Right ➡️'}
+             </button>
+          )}
+          <div style={{ width: '100%', maxWidth: isKidsView ? 800 : 550, opacity: isEffectivelyLocked ? 0.8 : 1 }}>
+            <FieldView assignment={seg.assignment} highlight={activePlayer} swapFrom={editMode ? swapFrom : null} onPlayerClick={handleFieldClick} upcomingSubs={editMode ? [] : upcomingSubs} orientation={orientation} />
+          </div>
+        </div>
+      </main>
+
+      {/* ── 4. Fat-Finger Bottom Panel ── */}
+      {activePlayer && (() => {
+        const { sGoals, sAssists } = getSeasonStats(activePlayer);
+        return (
+          <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', borderTop: '4px solid #1d6fcf', padding: '24px', boxShadow: '0 -10px 40px rgba(0,0,0,0.15)', zIndex: 100, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: '#0f2d5a' }}>{activePlayer}</h2>
+                <div style={{ marginTop: 8, background: '#f8fafc', padding: '8px 14px', borderRadius: 8, fontSize: 14, fontWeight: 800, color: '#4a6b8a', display: 'inline-flex', gap: 16, border: '2px solid #e2ecfc' }}>
+                  <span>⏱️ Today: {minutesMap[activePlayer] || 0}m</span>
+                  <span>|</span>
+                  <span>🏆 Season: {sGoals} Goals, {sAssists} Assists</span>
+                </div>
+              </div>
+              <button onClick={() => setActivePlayer(null)} style={{ background: '#f1f5f9', border: 'none', padding: '10px 16px', borderRadius: 8, fontSize: 18, fontWeight: 800, color: '#64748b', cursor: 'pointer' }}>Close ✕</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 24 }}>
+              <div style={{ flex: 1, background: '#fffbeb', border: '3px solid #f59e0b', borderRadius: 16, padding: 20, textAlign: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#b45309', marginBottom: 12 }}>⚽ GAME GOALS</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button onClick={() => updateStat(activePlayer, 'goals', -1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#fff', border: '3px solid #fcd34d', color: '#d97706', cursor: 'pointer' }}>−</button>
+                  <span style={{ fontSize: 40, fontWeight: 900, color: '#92400e' }}>{matchStats[activePlayer]?.goals || 0}</span>
+                  <button onClick={() => updateStat(activePlayer, 'goals', 1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#f59e0b', border: 'none', color: '#fff', cursor: 'pointer' }}>+</button>
+                </div>
+              </div>
+              <div style={{ flex: 1, background: '#eff6ff', border: '3px solid #3b82f6', borderRadius: 16, padding: 20, textAlign: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#1d4ed8', marginBottom: 12 }}>👟 GAME ASSISTS</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button onClick={() => updateStat(activePlayer, 'assists', -1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#fff', border: '3px solid #93c5fd', color: '#2563eb', cursor: 'pointer' }}>−</button>
+                  <span style={{ fontSize: 40, fontWeight: 900, color: '#1e3a8a' }}>{matchStats[activePlayer]?.assists || 0}</span>
+                  <button onClick={() => updateStat(activePlayer, 'assists', 1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#3b82f6', border: 'none', color: '#fff', cursor: 'pointer' }}>+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Coach's Script Modal ── */}
+      {showScript && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200, padding: 20 }}>
+          <div style={{ background: '#fff', padding: 32, borderRadius: 24, width: '100%', maxWidth: 600 }}>
+            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginBottom: 20 }}>📋 Next Sub Script</h2>
+            <ul style={{ fontSize: 20, fontWeight: 700, color: '#4a6b8a', lineHeight: 1.8, listStyle: 'none', padding: 0 }}>
+              {upcomingSubs.map((sub, idx) => (
+                <li key={idx} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '2px solid #e2ecfc' }}>
+                  <span style={{ color: '#059669' }}>{sub.on}</span> you are on for <span style={{ color: '#dc2626' }}>{sub.off || 'nobody'}</span> at <strong>{sub.pos}</strong>.
+                </li>
+              ))}
+              {upcomingSubs.length === 0 && <li>No substitutions queued.</li>}
+            </ul>
+            <button onClick={() => setShowScript(false)} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', marginTop: 16 }}>Got It</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. Post-Game Footer ── */}
+      <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7' }}>
+        <button 
+          onClick={() => { 
+            onSave({ stats: matchStats }); 
+            onGoSeason(); 
+          }} 
+          style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+          📊 SAVE GAME & VIEW SEASON TRACKER
+        </button>
+      </footer>
+    </div>
+  );
+}
