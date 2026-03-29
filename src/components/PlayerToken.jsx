@@ -1,108 +1,39 @@
-/**
- * PlayerToken — a circular badge representing one player on the field.
- *
- * Props:
- *   pos      – position code e.g. 'GK', 'LB'
- *   name     – player name (or null)
- *   isHL     – highlighted (yellow glow, e.g. current segment)
- *   isSel    – selected for swap (blue ring)
- *   isTgt    – valid swap target (green dashed ring)
- *   onClick  – click handler
- *   size     – circle diameter in px (default 40)
- */
 import { POS_BG, POS_TEXT, POS_BORDER } from '../constants.js';
 
-export default function PlayerToken({ pos, name, isHL, isSel, isTgt, onClick, size = 40 }) {
-  const bg     = POS_BG[pos]     || '#4a6b8a';
-  const text   = POS_TEXT[pos]   || '#fff';
-  const border = POS_BORDER[pos] || 'rgba(255,255,255,0.55)';
+export default function PlayerToken({ pos, name, isHL, isSel, isTgt, onClick, size }) {
+  const bg = POS_BG[pos] || '#e2e8f0';
+  const textCol = POS_TEXT[pos] || '#0f172a';
+  const borderCol = POS_BORDER[pos] || '#0f172a';
 
-  const ringStyle = {
-    position: 'absolute', top: '50%', left: '50%',
-    width: size + 18, height: size + 18,
-    transform: 'translate(-50%, -54%)',
-    borderRadius: '50%', pointerEvents: 'none', zIndex: 1,
-  };
-
-  const circleBg = isSel
-    ? `radial-gradient(circle at 35% 35%, #1d6fcf, #1d6fcf)`
-    : isTgt
-    ? `radial-gradient(circle at 35% 35%, #059669, #059669)`
-    : isHL
-    ? `radial-gradient(circle at 35% 35%, #fffbeb, #d97706)`
-    : `radial-gradient(circle at 35% 35%, ${bg}ee, ${bg})`;
-
-  const circleBorder = isSel ? '2.5px solid #fff'
-    : isTgt  ? '2px solid #fff'
-    : isHL   ? '2.5px solid #fffbeb'
-    : `2px solid ${border}`;
-
-  const shadow = isSel
-    ? '0 0 16px rgba(59,130,246,0.8), 0 3px 8px rgba(0,0,0,0.35)'
-    : isTgt
-    ? '0 0 14px rgba(5,150,105,0.7), 0 3px 8px rgba(0,0,0,0.3)'
-    : isHL
-    ? '0 0 12px rgba(251,191,36,0.7), 0 3px 8px rgba(0,0,0,0.3)'
-    : '0 2px 8px rgba(0,0,0,0.25)';
-
-  const nameText = isSel ? '#fff'
-    : isTgt  ? '#fff'
-    : isHL   ? '#92400e'
-    : text;
+  // Highlight/Selection logic overrides
+  const currentBg = isSel ? '#ddeeff' : isTgt ? '#d6f0e8' : isHL ? '#fef3c7' : bg;
+  const currentBorder = isSel ? '#1d6fcf' : isTgt ? '#059669' : isHL ? '#d97706' : borderCol;
+  
+  const fontSizeName = Math.max(10, size * 0.22);
+  const fontSizePos = Math.max(8, size * 0.16);
 
   return (
     <div
       onClick={onClick}
-      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
-               cursor: onClick ? 'pointer' : 'default', position: 'relative' }}
+      style={{
+        width: size, height: size,
+        borderRadius: '50%',
+        background: currentBg,
+        border: `4px solid ${currentBorder}`,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        cursor: onClick ? 'pointer' : 'default',
+        boxShadow: isSel ? '0 0 0 4px rgba(29,111,207,0.3)' : '0 4px 8px rgba(0,0,0,0.1)',
+        transition: 'transform 0.1s, background 0.1s',
+        transform: isSel ? 'scale(1.1)' : 'scale(1)',
+        zIndex: isSel ? 20 : 1,
+      }}
     >
-      {/* Selection ring */}
-      {isSel && (
-        <div style={{ ...ringStyle, border: '2.5px solid #1d6fcf',
-                      background: 'rgba(59,130,246,0.15)' }} />
-      )}
-      {/* Target ring (animated spin) */}
-      {isTgt && !isSel && (
-        <div style={{ ...ringStyle, border: '2.5px dashed #059669',
-                      animation: 'spin 2.5s linear infinite', opacity: 0.9 }} />
-      )}
-      {/* Highlight ring (animated glow) */}
-      {isHL && !isSel && !isTgt && (
-        <div style={{ ...ringStyle, background: 'rgba(251,191,36,0.25)',
-                      animation: 'glow 1.5s ease-in-out infinite' }} />
-      )}
-
-      {/* Circle */}
-      <div style={{
-        position: 'relative', zIndex: 2,
-        width: size, height: size, borderRadius: '50%',
-        background: circleBg, border: circleBorder,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: shadow,
-      }}>
-        <span style={{
-          fontSize: Math.max(8, size * 0.19),
-          fontWeight: 700, color: nameText, textAlign: 'center',
-          lineHeight: 1.25, padding: '0 2px',
-          maxWidth: size - 4, overflow: 'hidden',
-          display: '-webkit-box', WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-        }}>
-          {name || '—'}
-        </span>
-
-        {/* Position label — inside circle, bottom edge */}
-        <div style={{
-          position: 'absolute', bottom: 7, left: 0, right: 0,
-          textAlign: 'center',
-          fontSize: Math.max(6, Math.round(size * 0.15)),
-          fontWeight: 700, color: nameText,
-          letterSpacing: 0.3,
-          lineHeight: 1,
-          pointerEvents: 'none',
-        }}>
-          {pos}
-        </div>
+      <div style={{ fontSize: fontSizePos, fontWeight: 900, color: textCol, opacity: 0.8, marginBottom: -2 }}>
+        {pos}
+      </div>
+      <div style={{ fontSize: fontSizeName, fontWeight: 800, color: textCol, letterSpacing: 0.5 }}>
+        {name || '—'}
       </div>
     </div>
   );

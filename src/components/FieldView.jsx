@@ -1,27 +1,16 @@
-/**
- * FieldView — the green pitch diagram with player tokens.
- *
- * Props:
- *   assignment    – { GK: name, LB: name, … }
- *   highlight     – player name to highlight (yellow), or null
- *   swapFrom      – { type, pos?, name } | null  — currently selected for swap
- *   onPlayerClick – (name, pos) => void, or null for read-only
- */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import FieldSVG    from './FieldSVG.jsx';
 import PlayerToken from './PlayerToken.jsx';
 import { FIELD_LAYOUT } from '../constants.js';
 
-// Compute token size from actual field container width.
-// Min gap between adjacent tokens (30% field width) sets the ceiling;
-// coefficient 0.21 leaves comfortable clearance at any size.
 function calcSize(w) {
-  return Math.min(108, Math.max(40, Math.round(w * 0.21)));
+  // Increased base token size by ~20% for fat-finger friendliness
+  return Math.min(120, Math.max(50, Math.round(w * 0.24)));
 }
 
-export default function FieldView({ assignment, highlight, swapFrom, onPlayerClick, upcomingSubs = [] }) {
+export default function FieldView({ assignment, highlight, swapFrom, onPlayerClick, upcomingSubs = [], orientation = 'vertical' }) {
   const containerRef = useRef(null);
-  const [tokenSize, setTokenSize] = useState(40);
+  const [tokenSize, setTokenSize] = useState(50);
 
   const measure = useCallback(() => {
     if (containerRef.current) setTokenSize(calcSize(containerRef.current.offsetWidth));
@@ -34,85 +23,79 @@ export default function FieldView({ assignment, highlight, swapFrom, onPlayerCli
     return () => ro.disconnect();
   }, [measure]);
 
+  // Handle the 'Presentation Mode' flip
+  const getCoordinates = (x, y) => {
+    if (orientation === 'horizontal-right') return { left: `${y}%`, top: `${100 - x}%` };
+    if (orientation === 'horizontal-left') return { left: `${100 - y}%`, top: `${x}%` };
+    return { left: `${x}%`, top: `${y}%` }; // default vertical
+  };
+
   return (
     <div ref={containerRef} style={{
-      position: 'relative', width: '100%', paddingBottom: '148%',
+      position: 'relative', width: '100%', 
+      paddingBottom: orientation === 'vertical' ? '148%' : '65%', // Adjust aspect ratio for horizontal
       background: 'linear-gradient(180deg, #2d7a3a 0%, #3a8f48 30%, #2d7a3a 60%, #3a8f48 85%, #2d7a3a 100%)',
       borderRadius: 14, overflow: 'hidden',
-      boxShadow: '0 8px 32px rgba(15,45,90,0.18)',
-      border: '3px solid rgba(29,111,207,0.25)',
+      border: '4px solid #ffffff',
     }}>
-      {/* Grass stripes */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        backgroundImage: 'repeating-linear-gradient(180deg, transparent, transparent 18px, rgba(0,0,0,0.06) 18px, rgba(0,0,0,0.06) 36px)',
-        pointerEvents: 'none',
-      }} />
-
       <FieldSVG />
-
-      {/* Attack label */}
-      <div style={{
-        position: 'absolute', left: '50%', top: '1.5%',
-        transform: 'translateX(-50%)',
-        fontSize: 8, fontWeight: 700,
-        color: 'rgba(255,255,255,0.35)', letterSpacing: 2,
-        pointerEvents: 'none',
-      }}>
-        ▲ ATTACK
-      </div>
 
       {FIELD_LAYOUT.map(({ pos, x, y }) => {
         const name    = assignment[pos];
         const subInfo = upcomingSubs.find(s => s.pos === pos) || null;
 
-        // Determine swap highlight state
         let isSel = false;
         let isTgt = false;
         if (swapFrom) {
-          if (swapFrom.type === 'pos' && swapFrom.pos === pos) {
-            isSel = true;
-          } else {
-            isTgt = true; // every other position is a valid target
-          }
+          if (swapFrom.type === 'pos' && swapFrom.pos === pos) isSel = true;
+          else isTgt = true; 
         }
+
+        const coords = getCoordinates(x, y);
 
         return (
           <div
             key={pos}
             style={{
               position: 'absolute',
-              left: `${x}%`, top: `${y}%`,
+              ...coords,
               transform: 'translate(-50%, -50%)',
               zIndex: 10,
               display: 'flex', flexDirection: 'column', alignItems: 'center',
             }}
           >
-            <PlayerToken
-              pos={pos}
-              name={name}
-              isHL={!swapFrom && !!(highlight && highlight === name)}
-              isSel={isSel}
-              isTgt={isTgt}
-onClick={name && onPlayerClick ? () => onPlayerClick(name, pos) : null}
-              size={tokenSize}
-            />
+            {/* Dashed Red Border for outgoing player wrapper */}
             <div style={{
-              marginTop: 8, textAlign: 'center',
-              background: subInfo ? '#059669' : 'transparent',
-              color: '#fff',
-              borderRadius: 8, padding: '2px 7px',
-              fontSize: Math.max(9, Math.round(tokenSize * 0.16)),
-              whiteSpace: 'nowrap',
-              boxShadow: subInfo ? '0 1px 4px rgba(0,0,0,0.35)' : 'none',
-              lineHeight: 1.3,
-              visibility: subInfo ? 'visible' : 'hidden',
+              padding: subInfo ? 4 : 0,
+              border: subInfo ? '4px dashed #dc2626' : 'none',
+              borderRadius: '50%',
+              transition: 'all 0.2s ease',
             }}>
-              ▲ {subInfo?.on ?? '—'}
-              <div style={{ fontSize: Math.max(8, Math.round(tokenSize * 0.13)), opacity: 0.9 }}>
-                {subInfo?.htBefore ? 'HT' : `@ ${subInfo?.atMin ?? 0} min`}
-              </div>
+              <PlayerToken
+                pos={pos}
+                name={name}
+                isHL={!swapFrom && !!(highlight && highlight === name)}
+                isSel={isSel}
+                isTgt={isTgt}
+                onClick={name && onPlayerClick ? () => onPlayerClick(name, pos) : null}
+                size={tokenSize}
+              />
             </div>
+            
+            {/* Ghost Sub "▲ IN" Badge */}
+            {subInfo && (
+              <div style={{
+                position: 'absolute', bottom: -12,
+                background: '#059669', color: '#fff',
+                border: '3px solid #fff', borderRadius: 12, 
+                padding: '2px 10px',
+                fontSize: Math.max(10, Math.round(tokenSize * 0.18)),
+                fontWeight: 900, whiteSpace: 'nowrap', zIndex: 30,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}>
+                ▲ IN: {subInfo.on}
+              </div>
+            )}
           </div>
         );
       })}

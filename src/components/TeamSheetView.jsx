@@ -1,13 +1,7 @@
-/**
- * TeamSheetView — the main result screen.
- * Tabs: Field · Schedule · Stats
- */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import FieldView from './FieldView.jsx';
 import { calcStats } from '../scheduler.js';
 import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER } from '../constants.js';
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getStartMin(segments, idx) {
   let t = 0;
@@ -18,1016 +12,305 @@ function getStartMin(segments, idx) {
 function getSubChanges(prev, curr) {
   const changes = [];
   const prevBenchSet = new Set(prev.bench);
-  const currBenchSet = new Set(curr.bench);
-
-  const comingOn = [...new Set(Object.values(curr.assignment).filter(Boolean))]
-    .filter(p => prevBenchSet.has(p));
-  const goingOff = [...new Set(Object.values(prev.assignment).filter(Boolean))]
-    .filter(p => currBenchSet.has(p));
-
+  const comingOn = [...new Set(Object.values(curr.assignment).filter(Boolean))].filter(p => prevBenchSet.has(p));
+  
   comingOn.forEach(onPlayer => {
     const pos = Object.entries(curr.assignment).find(([, n]) => n === onPlayer)?.[0];
     const offPlayer = prev.assignment[pos];
     if (pos) changes.push({ type: 'sub', on: onPlayer, off: offPlayer || null, pos });
   });
 
-  if (prev.gkName !== curr.gkName &&
-      !changes.some(c => c.on === curr.gkName || c.off === prev.gkName)) {
+  if (prev.gkName !== curr.gkName && !changes.some(c => c.on === curr.gkName || c.off === prev.gkName)) {
     changes.push({ type: 'gk', on: curr.gkName, off: prev.gkName });
   }
 
   Object.entries(curr.assignment).forEach(([pos, name]) => {
     if (name && !comingOn.includes(name) && prev.assignment[pos] !== name) {
       const prevPos = Object.entries(prev.assignment).find(([, n]) => n === name)?.[0];
-      if (prevPos && prevPos !== pos) {
-        changes.push({ type: 'poschange', player: name, from: prevPos, to: pos });
-      }
+      if (prevPos && prevPos !== pos) changes.push({ type: 'poschange', player: name, from: prevPos, to: pos });
     }
   });
-
   return changes;
 }
 
-function PosBadge({ pos }) {
-  return (
-    <span style={{
-      display: 'inline-block', padding: '1px 5px', borderRadius: 4,
-      fontSize: 9, fontWeight: 800,
-      background: POS_BG[pos] || '#64748b',
-      color: POS_TEXT[pos] || '#fff',
-      border: `1px solid ${POS_BORDER[pos] || 'transparent'}`,
-      verticalAlign: 'middle',
-    }}>{pos}</span>
-  );
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-
-export default function TeamSheetView({
-  players, segments, lockGK,
-  seasonGames, onSwap,
-  onSave, onReorder, onGoSeason, onGoSetup,
-  isSaved, toast,
+export default function TeamSheetView({ 
+  players, segments, lockGK, seasonGames, onSwap, onSave, onReorder, onGoSeason, onGoSetup, isSaved, toast,
+  gameClock = { isRunning: false, accumulatedMs: 0, currentSegIdx: null, segmentStartTime: null },
+  onStartPeriod, onPausePeriod, onSplitSegment 
 }) {
-  const [tab,        setTab]        = useState('field');
+  const [tab, setTab] = useState('field');
   const [currentSeg, setCurrentSeg] = useState(0);
-  const [editMode,   setEditMode]   = useState(false);
-  const [swapFrom,   setSwapFrom]   = useState(null); // { type, pos?, name } | null
-  const [highlight,  setHighlight]  = useState(null); // player name
-  const [saveOpen,   setSaveOpen]   = useState(false);
-  const [matchLabel, setMatchLabel] = useState('');
-  const [goals,      setGoals]      = useState({});
-  const [potm,       setPotm]       = useState('');
+  const [editMode, setEditMode] = useState(false);
+  const [swapFrom, setSwapFrom] = useState(null);
+  
+  const [activePlayer, setActivePlayer] = useState(null); 
+  const [matchStats, setMatchStats] = useState({}); 
+  const [orientation, setOrientation] = useState('vertical'); 
+  const [showScript, setShowScript] = useState(false);
 
-  const seg       = segments[currentSeg];
+  // Clock State
+  const [now, setNow] = useState(Date.now());
+  const [showClockMenu, setShowClockMenu] = useState(false);
+
+  const seg = segments[currentSeg];
   const benchSize = players.length - 9;
-  const hasEdits  = segments.some(s => s.edited);
-
-  const { minutesMap, gkDutyMap, playerSchedule } = useMemo(
-    () => calcStats(segments, players),
-    [segments, players]
-  );
-
+  
+  const { minutesMap, gkDutyMap, playerSchedule } = useMemo(() => calcStats(segments, players), [segments, players]);
   const minMins = Math.min(...Object.values(minutesMap));
   const maxMins = Math.max(...Object.values(minutesMap));
 
-  // Bench count per player (from playerSchedule)
-  const benchCountMap = useMemo(() => {
-    const m = {};
-    players.forEach(p => {
-      m[p] = (playerSchedule[p] || []).filter(s => s === 'BENCH').length;
-    });
-    return m;
-  }, [players, playerSchedule]);
-
-  // Upcoming sub changes for the next segment (drives field overlays + info bar)
   const upcomingSubs = useMemo(() => {
     if (currentSeg >= segments.length - 1) return [];
-    const changes = getSubChanges(segments[currentSeg], segments[currentSeg + 1]);
-    const atMin   = getStartMin(segments, currentSeg + 1);
-    const nextSeg = segments[currentSeg + 1];
-    return changes
+    return getSubChanges(segments[currentSeg], segments[currentSeg + 1])
       .filter(c => c.type === 'sub')
-      .map(c => ({ pos: c.pos, on: c.on, off: c.off, atMin, htBefore: nextSeg.htBefore }));
+      .map(c => ({ pos: c.pos, on: c.on, off: c.off }));
   }, [currentSeg, segments]);
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
-  const goToSeg = (i) => {
-    setCurrentSeg(i);
-    setSwapFrom(null);
-    // keep editMode, just clear selection
+  // --- TIMER MATH ---
+  useEffect(() => {
+    let interval;
+    if (gameClock.isRunning) {
+      interval = setInterval(() => setNow(Date.now()), 1000);
+    } else {
+      setNow(Date.now()); // Sync when paused
+    }
+    return () => clearInterval(interval);
+  }, [gameClock.isRunning]);
+
+  const isCurrentClockSeg = gameClock.currentSegIdx === currentSeg;
+  
+  const elapsedMs = isCurrentClockSeg 
+    ? (gameClock.accumulatedMs + (gameClock.isRunning && gameClock.segmentStartTime ? now - gameClock.segmentStartTime : 0))
+    : 0;
+    
+  const elapsedSecs = Math.floor(elapsedMs / 1000);
+  const elapsedMinsForSplit = Math.floor(elapsedSecs / 60);
+  const remainingSecsTotal = Math.max(0, (seg?.duration * 60) - elapsedSecs);
+  
+  const remMins = Math.floor(remainingSecsTotal / 60);
+  const remSecs = remainingSecsTotal % 60;
+  
+  const isWarning = remainingSecsTotal <= 120 && remainingSecsTotal > 30; // Under 2 mins
+  const isCritical = remainingSecsTotal <= 30 && remainingSecsTotal > 0;  // Under 30 secs
+  const clockColor = isCritical ? '#dc2626' : isWarning ? '#d97706' : '#059669';
+  const clockBg = isCritical ? '#fee2e2' : isWarning ? '#fffbeb' : '#ecfdf5';
+
+  const updateStat = (player, type, delta) => {
+    setMatchStats(prev => {
+      const current = prev[player]?.[type] || 0;
+      return { ...prev, [player]: { ...(prev[player] || { goals: 0, assists: 0 }), [type]: Math.max(0, current + delta) } };
+    });
   };
 
-  const toggleEdit = () => {
-    setEditMode(m => !m);
-    setSwapFrom(null);
-    setHighlight(null);
-  };
-
-  // ── Click handler (shared by left panel & field) ───────────────────────────
-  const handleClick = ({ type, pos, name }) => {
+  const handleFieldClick = (name, pos) => {
     if (!editMode) {
-      // View mode: toggle highlight
-      setHighlight(h => (h === name ? null : name));
+      setActivePlayer(activePlayer === name ? null : name);
       return;
     }
-
-    // Edit mode — swap logic
-    const locked = type === 'pos' && pos === 'GK' && lockGK;
+    if (seg.locked) return; // Prevent edits on history
+    const locked = pos === 'GK' && lockGK;
     if (locked) return;
-
-    if (!swapFrom) {
-      setSwapFrom({ type, pos, name });
-      return;
-    }
-
-    // Cancel if same item tapped again
-    const isSame =
-      (type === 'pos'   && swapFrom.type === 'pos'   && swapFrom.pos  === pos)  ||
-      (type === 'bench' && swapFrom.type === 'bench' && swapFrom.name === name);
-    if (isSame) { setSwapFrom(null); return; }
-
-    // Block locked GK as target
-    if (type === 'pos' && pos === 'GK' && lockGK) { setSwapFrom(null); return; }
-
-    onSwap(currentSeg, { from: swapFrom, to: { type, pos, name } });
+    if (!swapFrom) { setSwapFrom({ type: 'pos', pos, name }); return; }
+    if (swapFrom.type === 'pos' && swapFrom.pos === pos) { setSwapFrom(null); return; }
+    onSwap(currentSeg, { from: swapFrom, to: { type: 'pos', pos, name } });
     setSwapFrom(null);
   };
 
-  const handleFieldClick = (name, pos) => handleClick({ type: 'pos', pos, name });
-
-  // ── Save ───────────────────────────────────────────────────────────────────
-  const handleSave = () => {
-    onSave({ label: matchLabel, goals, potm });
-    setSaveOpen(false);
+  const handleBenchClick = (name) => {
+    if (!editMode) {
+      setActivePlayer(activePlayer === name ? null : name);
+      return;
+    }
+    if (seg.locked) return;
+    if (!swapFrom) { setSwapFrom({ type: 'bench', name }); return; }
+    if (swapFrom.type === 'bench' && swapFrom.name === name) { setSwapFrom(null); return; }
+    onSwap(currentSeg, { from: swapFrom, to: { type: 'bench', name } });
+    setSwapFrom(null);
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RENDER HELPERS
-  // ═══════════════════════════════════════════════════════════════════════════
+  const handleEmergencySub = () => {
+    if (!onSplitSegment) return setEditMode(true); // Fallback if prop missing
+    if (gameClock.isRunning && isCurrentClockSeg && elapsedMinsForSplit > 0) {
+      const futureSegIdx = onSplitSegment(currentSeg, elapsedMinsForSplit);
+      if (futureSegIdx !== undefined) {
+        setCurrentSeg(futureSegIdx);
+        setEditMode(true);
+      }
+    } else {
+      setEditMode(true);
+    }
+  };
 
-  /** Left panel — position list + bench + journey */
-  function renderLeftPanel() {
-    const { assignment, bench } = seg;
+  const isKidsView = orientation !== 'vertical';
 
-    return (
-      <div style={{ width: 162, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+  if (!seg) return null;
 
-        {/* Edit mode banner */}
-        {editMode && (
-          <div style={{
-            padding: '6px 8px', background: '#ddeeff', borderRadius: 8,
-            border: '1px solid #1d6fcf', marginBottom: 2,
-            fontSize: 10, fontWeight: 700, color: '#1558b0', lineHeight: 1.4,
-          }}>
-            ✏️ Editing {seg.label}
-            <div style={{ fontWeight: 400, color: '#4a6b8a', marginTop: 1, fontSize: 9 }}>
-              Changes only affect this period
+  return (
+    <div style={{ minHeight: '100vh', background: '#f0f6ff', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column' }}>
+      
+      {/* ── 1. Top Glance Bar ── */}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#fff', borderBottom: '3px solid #c7daf7' }}>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0f2d5a' }}>⚽ {players.length} Players | {benchSize} Bench</h1>
+        
+        {/* SMART HEADER CLOCK */}
+        <div style={{ position: 'relative' }}>
+          <button 
+            onClick={() => setShowClockMenu(!showClockMenu)}
+            style={{ 
+              fontSize: 24, fontWeight: 900, color: isCurrentClockSeg ? clockColor : '#64748b', 
+              background: isCurrentClockSeg ? clockBg : '#f1f5f9', 
+              padding: '6px 20px', border: `3px solid ${isCurrentClockSeg ? clockColor : '#cbd5e1'}`, 
+              borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8
+            }}>
+            {seg.locked ? '🔒' : isCurrentClockSeg && gameClock.isRunning ? '⏱️' : '⏸️'} 
+            {isCurrentClockSeg ? `${remMins.toString().padStart(2, '0')}:${remSecs.toString().padStart(2, '0')}` : `${seg.duration}:00`}
+          </button>
+
+          {/* CLOCK NUDGE MENU */}
+          {showClockMenu && !seg.locked && (
+            <div style={{ position: 'absolute', top: '110%', left: '50%', transform: 'translateX(-50%)', background: '#fff', border: '3px solid #1d6fcf', borderRadius: 12, padding: 12, display: 'flex', gap: 8, boxShadow: '0 10px 25px rgba(0,0,0,0.2)', zIndex: 200 }}>
+              {!gameClock.isRunning ? (
+                <>
+                  <button onClick={() => { onStartPeriod?.(currentSeg, 60); setShowClockMenu(false); }} style={{ padding: '8px 12px', background: '#e2ecfc', border: 'none', borderRadius: 8, fontWeight: 800, cursor: 'pointer' }}>+1m Offset</button>
+                  <button onClick={() => { onStartPeriod?.(currentSeg); setShowClockMenu(false); }} style={{ padding: '8px 24px', background: '#059669', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 900, fontSize: 16, cursor: 'pointer' }}>▶️ START</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => { onPausePeriod?.(); setShowClockMenu(false); }} style={{ padding: '8px 24px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 900, fontSize: 16, cursor: 'pointer' }}>⏸️ PAUSE</button>
+                </>
+              )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Swap status bar */}
-        {editMode && swapFrom && (
-          <div style={{
-            padding: '5px 8px', background: '#1558b0', borderRadius: 8,
-            fontSize: 10, fontWeight: 700, color: '#fff',
-            display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2,
-          }}>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {swapFrom.type === 'pos' ? `${swapFrom.pos}: ` : '🪑 '}
-              {swapFrom.name}
-              <span style={{ fontWeight: 400, opacity: 0.8 }}> — tap to swap</span>
-            </span>
-            <button
-              onClick={() => setSwapFrom(null)}
-              style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13, padding: 0, flexShrink: 0 }}
-            >✕</button>
-          </div>
-        )}
+        <button onClick={() => setOrientation(isKidsView ? 'vertical' : 'horizontal-right')} style={{ padding: '10px 20px', fontSize: 16, fontWeight: 800, background: isKidsView ? '#059669' : '#e2ecfc', border: `3px solid ${isKidsView ? '#047857' : '#1d6fcf'}`, borderRadius: 8, color: isKidsView ? '#fff' : '#1d6fcf', cursor: 'pointer' }}>
+          {isKidsView ? '📱 Coach View' : '📺 Show Kids'}
+        </button>
+      </header>
 
-        {/* Positions */}
-        {POSITIONS.map(pos => {
-          const name   = assignment[pos];
-          const locked = pos === 'GK' && lockGK;
-          const isSel  = editMode && swapFrom?.type === 'pos' && swapFrom.pos === pos;
-          const isTgt  = editMode && !!swapFrom && !locked && !(swapFrom.type === 'pos' && swapFrom.pos === pos);
-          const isHL   = !editMode && highlight === name && !!name;
+      {/* ── 2. Chunky Timeline ── */}
+      <div style={{ display: 'flex', gap: 12, padding: '12px 24px', background: '#fff', borderBottom: '3px solid #c7daf7', overflowX: 'auto' }}>
+        {segments.map((s, i) => (
+          <button key={i} onClick={() => { setCurrentSeg(i); setSwapFrom(null); setEditMode(false); }} style={{ padding: '12px 20px', fontSize: 15, fontWeight: 800, border: `3px solid ${i === currentSeg ? '#1558b0' : s.htBefore ? '#f59e0b' : '#c7daf7'}`, borderRadius: 8, background: i === currentSeg ? '#1d6fcf' : s.htBefore ? '#fffbeb' : '#f8fafc', color: i === currentSeg ? '#fff' : s.htBefore ? '#b45309' : '#4a6b8a', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            {s.locked ? '🔒 ' : s.htBefore ? '⏸ ' : ''}{s.label} ({s.duration}m)
+          </button>
+        ))}
+      </div>
 
-          return (
-            <div
-              key={pos}
-              onClick={() => !locked && handleClick({ type: 'pos', pos, name })}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: isSel ? '#ddeeff' : isTgt ? '#d6f0e8' : isHL ? '#fffbeb' : '#ffffff',
-                border: `2px solid ${isSel ? '#1d6fcf' : isTgt ? '#059669' : isHL ? '#d97706' : '#c7daf7'}`,
-                borderRadius: 8, padding: '5px 8px',
-                cursor: locked ? 'not-allowed' : 'pointer',
-                opacity: locked ? 0.5 : 1,
-                transition: 'all 0.12s',
-              }}
-            >
-              <div style={{
-                width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
-                background: POS_BG[pos], border: `1.5px solid ${POS_BORDER[pos]}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 7, fontWeight: 800, color: POS_TEXT[pos],
-              }}>
-                {pos}
-              </div>
-              <span style={{
-                fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                color: isSel ? '#1558b0' : isTgt ? '#065f46' : isHL ? '#92400e' : '#0f2d5a',
-              }}>
-                {name || '—'}
-              </span>
-              {locked && <span style={{ fontSize: 9 }}>🔒</span>}
-            </div>
-          );
-        })}
-
-        {/* Bench */}
-        {bench.length > 0 && (
-          <>
-            <div style={{ fontSize: 9, fontWeight: 700, color: '#92400e', letterSpacing: 0.8, padding: '4px 2px 1px' }}>
-              🪑 BENCH
-            </div>
-            {bench.map(name => {
-              const isSel = editMode && swapFrom?.type === 'bench' && swapFrom.name === name;
-              const isTgt = editMode && !!swapFrom && !(swapFrom.type === 'bench' && swapFrom.name === name);
-              const isHL  = !editMode && highlight === name;
-              return (
-                <div
-                  key={name}
-                  onClick={() => handleClick({ type: 'bench', name })}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    background: isSel ? '#ddeeff' : isTgt ? '#d6f0e8' : isHL ? '#fffbeb' : '#fef3c7',
-                    border: `2px solid ${isSel ? '#1d6fcf' : isTgt ? '#059669' : isHL ? '#d97706' : '#fcd34d'}`,
-                    borderRadius: 8, padding: '5px 8px', cursor: 'pointer',
-                    transition: 'all 0.12s',
-                  }}
-                >
-                  <div style={{
-                    width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
-                    background: '#fde68a', border: '1.5px solid #f59e0b',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 7, fontWeight: 800, color: '#92400e',
-                  }}>SUB</div>
-                  <span style={{
-                    fontSize: 12, fontWeight: 600, flex: 1,
-                    color: isSel ? '#1558b0' : isTgt ? '#065f46' : '#92400e',
-                  }}>
-                    {name}
-                  </span>
-                </div>
-              );
-            })}
-          </>
-        )}
-
-        {/* Journey panel — shown when a player is highlighted in view mode */}
-        {!editMode && highlight && playerSchedule[highlight] && (
-          <div style={{
-            marginTop: 5, padding: '8px 9px',
-            background: '#f5f9ff', borderRadius: 8,
-            border: '1px solid #c7daf7',
-          }}>
-            {/* Player name + dismiss */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: '#4a6b8a', letterSpacing: 0.8 }}>
-                {highlight} — JOURNEY
-              </div>
-              <button
-                onClick={() => setHighlight(null)}
-                style={{ background: 'none', border: 'none', color: '#7a96b0', cursor: 'pointer', fontSize: 12, padding: 0 }}
-              >✕</button>
-            </div>
-
-            {/* Goals counter */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
-              <span style={{ fontSize: 10, color: '#4a6b8a' }}>⚽ Goals</span>
-              <button
-                onClick={() => setGoals(g => ({ ...g, [highlight]: Math.max(0, (g[highlight] || 0) - 1) }))}
-                style={{
-                  width: 22, height: 22, borderRadius: 5, background: '#fff',
-                  border: '1px solid #c7daf7', color: '#4a6b8a',
-                  cursor: 'pointer', fontSize: 14, lineHeight: 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>−</button>
-              <span style={{
-                fontSize: 14, fontWeight: 800, minWidth: 18, textAlign: 'center',
-                color: (goals[highlight] || 0) > 0 ? '#d97706' : '#94a3b8',
-              }}>
-                {goals[highlight] || 0}
-              </span>
-              <button
-                onClick={() => setGoals(g => ({ ...g, [highlight]: (g[highlight] || 0) + 1 }))}
-                style={{
-                  width: 22, height: 22, borderRadius: 5, background: '#fff',
-                  border: '1px solid #c7daf7', color: '#4a6b8a',
-                  cursor: 'pointer', fontSize: 14, lineHeight: 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>+</button>
-            </div>
-
-            {/* Segment-by-segment positions (scrollable) */}
-            <div style={{ display: 'flex', gap: 3, overflowX: 'auto', scrollbarWidth: 'none', paddingBottom: 2 }}>
-              {segments.map((s, i) => {
-                const role     = playerSchedule[highlight][i];
-                const isActive = i === currentSeg;
+      {/* ── 3. Main Action Area ── */}
+      <main style={{ display: 'flex', flex: 1, overflow: 'hidden', padding: 16, gap: 16, flexDirection: isKidsView ? 'column' : 'row' }}>
+        
+        {/* Left Bench Panel (35%) */}
+        {(!isKidsView || editMode) && (
+          <div style={{ width: isKidsView ? '100%' : '35%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: '#4a6b8a', letterSpacing: 1 }}>THE BENCH</div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {seg.bench.map(name => {
+                const subTo = upcomingSubs.find(s => s.on === name);
+                const isSel = editMode && swapFrom?.type === 'bench' && swapFrom.name === name;
                 return (
-                  <div
-                    key={i}
-                    onClick={() => goToSeg(i)}
-                    style={{ flexShrink: 0, textAlign: 'center', cursor: 'pointer' }}
-                  >
-                    <div style={{ fontSize: 7, color: isActive ? '#1d6fcf' : '#94a3b8', marginBottom: 2 }}>
-                      {s.duration}m
+                  <div key={name} onClick={() => handleBenchClick(name)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, background: isSel ? '#eff6ff' : '#fff', border: `4px solid ${isSel ? '#1d6fcf' : '#cbd5e1'}`, borderRadius: 12, fontSize: 20, fontWeight: 800, cursor: seg.locked ? 'default' : 'pointer', opacity: seg.locked ? 0.7 : 1 }}>
+                    <div>
+                      🪑 {name}
+                      {subTo && !editMode && <span style={{ fontSize: 13, background: '#059669', color: '#fff', padding: '4px 8px', borderRadius: 6, marginLeft: 12 }}>▲ TO {subTo.pos}</span>}
                     </div>
-                    <div style={{
-                      padding: '2px 4px', borderRadius: 3, fontSize: 8, fontWeight: 700, minWidth: 22,
-                      background: role === 'BENCH' ? '#fde68a' : (POS_BG[role] || '#e2e8f0'),
-                      color: role === 'BENCH' ? '#92400e' : (POS_TEXT[role] || '#0f2d5a'),
-                      border: isActive ? '2px solid #1d6fcf' : '1.5px solid transparent',
-                      boxSizing: 'border-box',
-                    }}>
-                      {role || '?'}
-                    </div>
+                    <span style={{ fontSize: 16, color: '#64748b' }}>{minutesMap[name] || 0}m</span>
                   </div>
                 );
               })}
             </div>
-          </div>
-        )}
-      </div>
-    );
-  }
 
-  /** Timeline: progress bar + segment pills + transition summary */
-  function renderTimeline() {
-    const totalMins = 50;
+            {currentSeg < segments.length - 1 && !editMode && !seg.locked && (
+              <button onClick={() => setShowScript(true)} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fffbeb', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
+                📋 READ NEXT SUB SCRIPT
+              </button>
+            )}
 
-    return (
-      <div style={{ marginBottom: 8 }}>
-        {/* Progress bar */}
-        <div style={{
-          position: 'relative', height: 20, borderRadius: 10,
-          background: '#e2ecfc', overflow: 'hidden', marginBottom: 5,
-        }}>
-          {segments.map((s, i) => {
-            const startPct = (getStartMin(segments, i) / totalMins) * 100;
-            const widthPct = (s.duration / totalMins) * 100;
-            const isActive = i === currentSeg;
-            return (
-              <div
-                key={i}
-                onClick={() => goToSeg(i)}
-                title={s.label}
-                style={{
-                  position: 'absolute', left: `${startPct}%`, width: `${widthPct}%`,
-                  top: 0, height: '100%', cursor: 'pointer',
-                  background: isActive
-                    ? (s.half === 2 ? '#059669' : '#1558b0')
-                    : (s.half === 2 ? 'rgba(5,150,105,0.32)' : 'rgba(21,88,176,0.28)'),
-                  borderRight: '1px solid rgba(255,255,255,0.4)',
-                  transition: 'background 0.2s',
-                }}
-              />
-            );
-          })}
-          {/* HT vertical line */}
-          <div style={{
-            position: 'absolute', left: '50%', top: 0, bottom: 0,
-            width: 2, background: '#f59e0b', zIndex: 5, pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute', left: '50%', top: '50%',
-            transform: 'translate(-50%, -50%)',
-            fontSize: 7, fontWeight: 800, color: '#92400e', zIndex: 6,
-            background: 'rgba(255,248,220,0.9)', padding: '0 3px', borderRadius: 2,
-            pointerEvents: 'none', whiteSpace: 'nowrap',
-          }}>HT</div>
-        </div>
-
-        {/* Segment pills */}
-        <div style={{
-          display: 'flex', gap: 3, overflowX: 'auto',
-          scrollbarWidth: 'none', paddingBottom: 2,
-        }}>
-          {segments.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => goToSeg(i)}
-              style={{
-                flexShrink: 0, padding: '5px 8px',
-                background: i === currentSeg
-                  ? (s.half === 2 ? '#059669' : 'linear-gradient(135deg, #1558b0, #1d6fcf)')
-                  : '#ffffff',
-                border: `1px solid ${i === currentSeg ? 'transparent' : s.htBefore ? '#f59e0b' : '#c7daf7'}`,
-                borderRadius: 12, cursor: 'pointer',
-                fontSize: 10, fontWeight: 700,
-                color: i === currentSeg ? '#fff' : s.htBefore ? '#92400e' : '#4a6b8a',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {s.htBefore ? '⏸ ' : ''}{s.label}{s.edited ? ' ✏️' : ''}
-            </button>
-          ))}
-        </div>
-
-        {/* Transition summary (next segment changes) */}
-        {currentSeg < segments.length - 1 && (() => {
-          const changes = getSubChanges(segments[currentSeg], segments[currentSeg + 1]);
-          if (!changes.length) return null;
-          const nextSeg  = segments[currentSeg + 1];
-          const nextTime = getStartMin(segments, currentSeg + 1);
-          const timeLabel = nextSeg.htBefore ? '⏸ Half Time' : `⏱ ${nextTime} min`;
-          return (
-            <div style={{
-              marginTop: 6, padding: '10px 12px',
-              background: '#fff7ed', borderRadius: 10,
-              border: '2px solid #f59e0b',
-            }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#92400e', marginBottom: 7 }}>
-                {timeLabel}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {changes.map((c, ci) => (
-                  <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    {c.type === 'sub' && <>
-                      <span style={{ background: '#dc2626', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▼ {c.off}</span>
-                      <span style={{ fontSize: 18, color: '#94a3b8', flexShrink: 0 }}>→</span>
-                      <span style={{ background: '#059669', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▲ {c.on}</span>
-                      <PosBadge pos={c.pos} />
-                    </>}
-                    {c.type === 'gk' && <>
-                      <span style={{ background: '#dc2626', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▼ {c.off} 🧤</span>
-                      <span style={{ fontSize: 18, color: '#94a3b8', flexShrink: 0 }}>→</span>
-                      <span style={{ background: '#059669', color: '#fff', borderRadius: 20, padding: '5px 14px', fontSize: 15, flexShrink: 0 }}>▲ {c.on} 🧤</span>
-                    </>}
-                    {c.type === 'poschange' && (
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#1558b0' }}>
-                        {c.player}: <PosBadge pos={c.from} /> → <PosBadge pos={c.to} />
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-      </div>
-    );
-  }
-
-  /** Schedule tab: player×segment grid + sub instructions */
-  function renderScheduleTab() {
-    // Build sub instructions for each transition
-    const transitions = segments.slice(1).map((s, i) => ({
-      segIdx: i + 1,
-      seg: s,
-      changes: getSubChanges(segments[i], s),
-      time: getStartMin(segments, i + 1),
-    })).filter(t => t.changes.length > 0);
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-        {/* Grid table */}
-        <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #c7daf7', overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: segments.length * 60 + 100 }}>
-              <thead>
-                <tr>
-                  <th style={{
-                    padding: '8px 10px', background: '#f5f9ff', fontSize: 10,
-                    fontWeight: 700, color: '#4a6b8a', textAlign: 'left',
-                    borderBottom: '1px solid #e2ecfc', borderRight: '1px solid #e2ecfc',
-                    position: 'sticky', left: 0, zIndex: 2, minWidth: 80,
-                  }}>
-                    Player
-                  </th>
-                  {segments.map((s, i) => (
-                    <th
-                      key={i}
-                      style={{
-                        padding: '5px 6px', background: s.half === 2 ? '#f0faf5' : '#f5f9ff',
-                        fontSize: 9, fontWeight: 700, color: s.half === 2 ? '#059669' : '#4a6b8a',
-                        textAlign: 'center', borderBottom: '1px solid #e2ecfc',
-                        borderLeft: s.htBefore ? '3px solid #059669' : '1px solid #e2ecfc',
-                        minWidth: 52, whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {s.htBefore ? '⏸ ' : ''}{s.label}
-                      <div style={{ fontSize: 8, fontWeight: 400, color: '#7a96b0' }}>
-                        {s.duration} min
-                      </div>
-                    </th>
-                  ))}
-                  <th style={{
-                    padding: '5px 6px', background: '#f5f9ff', fontSize: 9,
-                    fontWeight: 700, color: '#4a6b8a', textAlign: 'center',
-                    borderBottom: '1px solid #e2ecfc', borderLeft: '2px solid #c7daf7',
-                    minWidth: 44,
-                  }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {players.map((p, pi) => (
-                  <tr
-                    key={p}
-                    onClick={() => setHighlight(h => h === p ? null : p)}
-                    style={{
-                      background: highlight === p ? '#fffbeb' : pi % 2 === 0 ? '#ffffff' : '#fafcff',
-                      cursor: 'pointer', transition: 'background 0.1s',
-                    }}
-                  >
-                    {/* Player name cell */}
-                    <td style={{
-                      padding: '5px 10px', fontSize: 11, fontWeight: 600,
-                      color: '#0f2d5a', borderBottom: '1px solid #f0f4fa',
-                      borderRight: '1px solid #e2ecfc',
-                      position: 'sticky', left: 0,
-                      background: highlight === p ? '#fffbeb' : pi % 2 === 0 ? '#ffffff' : '#fafcff',
-                      zIndex: 1,
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {gkDutyMap[p] ? '🧤 ' : ''}{p}
-                    </td>
-
-                    {/* Segment cells */}
-                    {segments.map((s, si) => {
-                      const role = playerSchedule[p][si];
-                      const isBench = role === 'BENCH';
-                      return (
-                        <td key={si} style={{
-                          padding: '4px 3px', textAlign: 'center',
-                          borderBottom: '1px solid #f0f4fa',
-                          borderLeft: s.htBefore ? '3px solid #059669' : '1px solid #e2ecfc',
-                        }}>
-                          <div style={{
-                            display: 'inline-block', padding: '2px 4px', borderRadius: 4,
-                            fontSize: 9, fontWeight: 700,
-                            background: isBench ? '#fde68a' : (POS_BG[role] || '#e2e8f0'),
-                            color: isBench ? '#92400e' : (POS_TEXT[role] || '#0f2d5a'),
-                            border: `1px solid ${isBench ? '#f59e0b' : (POS_BORDER[role] || '#c7daf7')}`,
-                            minWidth: 28,
-                          }}>
-                            {role || '—'}
-                          </div>
-                        </td>
-                      );
-                    })}
-
-                    {/* Total minutes */}
-                    <td style={{
-                      padding: '5px 6px', textAlign: 'center',
-                      fontSize: 11, fontWeight: 700, color: '#0f2d5a',
-                      borderBottom: '1px solid #f0f4fa',
-                      borderLeft: '2px solid #c7daf7',
-                    }}>
-                      {minutesMap[p] || 0}m
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Substitution instruction cards */}
-        {transitions.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a', letterSpacing: 1 }}>
-              SUBSTITUTION INSTRUCTIONS
-            </div>
-            {transitions.map(({ segIdx, seg: s, changes, time }) => (
-              <div key={segIdx} style={{
-                background: '#ffffff', borderRadius: 10,
-                border: `1px solid ${s.htBefore ? '#fcd34d' : '#c7daf7'}`,
-                overflow: 'hidden',
-              }}>
-                {/* Card header */}
-                <div style={{
-                  padding: '8px 12px',
-                  background: s.htBefore ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : '#f5f9ff',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                    background: s.htBefore ? '#f59e0b' : '#64748b',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 10, fontWeight: 800, color: '#fff',
-                  }}>
-                    {s.htBefore ? '⏸' : `${time}'`}
-                  </div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: s.htBefore ? '#92400e' : '#0f2d5a' }}>
-                    {s.htBefore ? 'Half Time' : `${time} min`}
-                    {s.edited ? <span style={{ color: '#c2410c', marginLeft: 6 }}>✏️ edited</span> : null}
-                  </div>
-                </div>
-
-                {/* Changes list */}
-                <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {changes.map((c, ci) => (
-                    <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, flexWrap: 'wrap' }}>
-                      {c.type === 'sub' && (
-                        <>
-                          <PosBadge pos={c.pos} />
-                          <span style={{ color: '#059669', fontWeight: 700 }}>▲ {c.on}</span>
-                          <span style={{ color: '#7a96b0' }}>replaces</span>
-                          <span style={{ color: '#f87171', fontWeight: 700 }}>▼ {c.off || '—'}</span>
-                        </>
-                      )}
-                      {c.type === 'gk' && (
-                        <>
-                          <span style={{
-                            padding: '1px 5px', borderRadius: 4, fontSize: 9, fontWeight: 800,
-                            background: '#d946ef', color: '#0f2d5a',
-                          }}>GK</span>
-                          <span style={{ color: '#059669', fontWeight: 700 }}>▲ {c.on}</span>
-                          <span style={{ color: '#7a96b0' }}>in goal (replaces</span>
-                          <span style={{ color: '#f87171', fontWeight: 700 }}>▼ {c.off})</span>
-                        </>
-                      )}
-                      {c.type === 'poschange' && (
-                        <>
-                          <span style={{ color: '#4a6b8a', fontWeight: 600 }}>{c.player}</span>
-                          <span style={{ color: '#7a96b0' }}>moves</span>
-                          <PosBadge pos={c.from} />
-                          <span style={{ color: '#7a96b0' }}>→</span>
-                          <PosBadge pos={c.to} />
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /** Stats tab: playing time bars + fairness */
-  function renderStatsTab() {
-    const maxBar = 50; // total game minutes
-    const gap = maxMins - minMins;
-    const gapColor = gap === 0 ? '#059669' : gap <= 5 ? '#059669' : gap <= 10 ? '#d97706' : '#f87171';
-    const allBenched = benchSize === 0 || players.every(p => (benchCountMap[p] || 0) > 0);
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-        {/* Playing time */}
-        <div style={{
-          background: '#ffffff', borderRadius: 12,
-          padding: '16px 18px', border: '1px solid #c7daf7',
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a', letterSpacing: 1, marginBottom: 12 }}>
-            PLAYING TIME
-          </div>
-
-          {players.map(p => {
-            const mins    = minutesMap[p] || 0;
-            const pct     = Math.round((mins / maxBar) * 100);
-            const isGK    = !!gkDutyMap[p];
-            const bCount  = benchCountMap[p] || 0;
-            return (
-              <div key={p} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '6px 0', borderBottom: '1px solid #e2ecfc',
-              }}>
-                <span style={{
-                  fontSize: 12, fontWeight: 600, color: '#0f2d5a',
-                  minWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {p}
-                </span>
-                {/* Bar */}
-                <div style={{ flex: 1, height: 7, background: '#e2ecfc', borderRadius: 4 }}>
-                  <div style={{
-                    height: '100%', borderRadius: 4,
-                    background: isGK
-                      ? 'linear-gradient(90deg, #d946ef, #a855f7)'
-                      : 'linear-gradient(90deg, #1558b0, #1d6fcf)',
-                    width: `${(mins / maxBar) * 100}%`,
-                    transition: 'width 0.5s',
-                  }} />
-                </div>
-                {/* Minutes */}
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#0f2d5a', minWidth: 28, textAlign: 'right' }}>
-                  {mins}m
-                </span>
-                {/* Pct pill */}
-                <span style={{
-                  fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 10,
-                  background: '#e2ecfc', color: '#4a6b8a', minWidth: 32, textAlign: 'center',
-                }}>
-                  {pct}%
-                </span>
-                {/* Badges */}
-                {isGK  && <span style={{ fontSize: 10 }}>🧤</span>}
-                {bCount > 0 && (
-                  <span style={{ fontSize: 9, color: '#92400e', fontWeight: 700 }}>
-                    🪑{bCount}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Fairness summary */}
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: '#4a6b8a' }}>⚖️ Time spread</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: gapColor }}>
-                {gap === 0
-                  ? 'Perfectly equal ✓'
-                  : `${minMins}–${maxMins} min · ${gap} min gap`}
-              </span>
-            </div>
-            {benchSize > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 11, color: '#4a6b8a' }}>🪑 All players benched</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: allBenched ? '#059669' : '#f87171' }}>
-                  {allBenched ? '✓ Yes' : '✗ Not yet'}
-                </span>
-              </div>
+            {!seg.locked && (
+              <button onClick={editMode ? () => setEditMode(false) : handleEmergencySub} style={{ padding: 20, fontSize: 18, fontWeight: 900, background: editMode ? '#1d6fcf' : '#059669', color: '#fff', border: `4px solid ${editMode ? '#1558b0' : '#047857'}`, borderRadius: 12, cursor: 'pointer' }}>
+                {editMode ? '✅ FINISH EDITING' : (gameClock.isRunning && isCurrentClockSeg ? '🚨 EMERGENCY MID-PERIOD SUB' : '🔄 EDIT LINEUP')}
+              </button>
+            )}
+            {seg.locked && (
+               <div style={{ padding: 16, textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#64748b', background: '#f1f5f9', borderRadius: 12, border: '2px dashed #cbd5e1' }}>
+                 🔒 This period is completed and cannot be edited.
+               </div>
             )}
           </div>
+        )}
+
+        {/* The Pitch (65%) */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#e2ecfc', borderRadius: 16, padding: 16 }}>
+          {isKidsView && (
+             <button onClick={() => setOrientation(o => o === 'horizontal-right' ? 'horizontal-left' : 'horizontal-right')} style={{ marginBottom: 16, padding: '10px 20px', fontSize: 16, fontWeight: 800, background: '#fff', border: '3px solid #cbd5e1', borderRadius: 8, cursor: 'pointer' }}>
+               {orientation === 'horizontal-right' ? '⬅️ Attacking Left' : 'Attacking Right ➡️'}
+             </button>
+          )}
+          <div style={{ width: '100%', maxWidth: isKidsView ? 800 : 550, opacity: seg.locked ? 0.8 : 1 }}>
+            <FieldView assignment={seg.assignment} highlight={activePlayer} swapFrom={editMode ? swapFrom : null} onPlayerClick={handleFieldClick} upcomingSubs={editMode ? [] : upcomingSubs} orientation={orientation} />
+          </div>
         </div>
-      </div>
-    );
-  }
+      </main>
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // MAIN RENDER
-  // ═══════════════════════════════════════════════════════════════════════════
+      {/* ── 4. Fat-Finger Bottom Panel ── */}
+      {activePlayer && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', borderTop: '4px solid #1d6fcf', padding: '24px', boxShadow: '0 -10px 40px rgba(0,0,0,0.15)', zIndex: 100, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: '#0f2d5a' }}>{activePlayer}</h2>
+              <div style={{ marginTop: 8, background: '#f1f5f9', padding: '6px 12px', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#475569', display: 'inline-block' }}>
+                ⏱️ Game: {minutesMap[activePlayer] || 0}m | Team Avg: {Math.round((maxMins + minMins) / 2)}m
+              </div>
+            </div>
+            <button onClick={() => setActivePlayer(null)} style={{ background: '#f1f5f9', border: 'none', padding: '10px 16px', borderRadius: 8, fontSize: 18, fontWeight: 800, color: '#64748b', cursor: 'pointer' }}>Close ✕</button>
+          </div>
 
-  return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'radial-gradient(ellipse at 50% 0%, #d6e8ff 0%, #f0f6ff 70%)',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
-      padding: '12px 10px 40px',
-    }}>
-
-      {/* Toast */}
-      {toast && (
-        <div style={{
-          position: 'fixed', top: 14, left: '50%', transform: 'translateX(-50%)',
-          zIndex: 9999,
-          background: toast.type === 'err' ? '#fee2e2' : '#ecfdf5',
-          border: `1px solid ${toast.type === 'err' ? '#f87171' : '#059669'}`,
-          borderRadius: 10, padding: '9px 18px',
-          color: toast.type === 'err' ? '#b91c1c' : '#059669',
-          fontSize: 13, fontWeight: 700,
-          boxShadow: '0 8px 24px rgba(0,40,100,0.12)',
-          whiteSpace: 'nowrap', pointerEvents: 'none',
-        }}>
-          {toast.msg}
+          <div style={{ display: 'flex', gap: 24 }}>
+            <div style={{ flex: 1, background: '#fffbeb', border: '3px solid #f59e0b', borderRadius: 16, padding: 20, textAlign: 'center' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#b45309', marginBottom: 12 }}>⚽ GOALS</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button onClick={() => updateStat(activePlayer, 'goals', -1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#fff', border: '3px solid #fcd34d', color: '#d97706', cursor: 'pointer' }}>−</button>
+                <span style={{ fontSize: 40, fontWeight: 900, color: '#92400e' }}>{matchStats[activePlayer]?.goals || 0}</span>
+                <button onClick={() => updateStat(activePlayer, 'goals', 1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#f59e0b', border: 'none', color: '#fff', cursor: 'pointer' }}>+</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, background: '#eff6ff', border: '3px solid #3b82f6', borderRadius: 16, padding: 20, textAlign: 'center' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#1d4ed8', marginBottom: 12 }}>👟 ASSISTS</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button onClick={() => updateStat(activePlayer, 'assists', -1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#fff', border: '3px solid #93c5fd', color: '#2563eb', cursor: 'pointer' }}>−</button>
+                <span style={{ fontSize: 40, fontWeight: 900, color: '#1e3a8a' }}>{matchStats[activePlayer]?.assists || 0}</span>
+                <button onClick={() => updateStat(activePlayer, 'assists', 1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#3b82f6', border: 'none', color: '#fff', cursor: 'pointer' }}>+</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      <div style={{ maxWidth: 860, margin: '0 auto' }}>
-
-        {/* ── Header ── */}
-        <div style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          marginBottom: 10, flexWrap: 'wrap', gap: 8,
-        }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f2d5a' }}>
-              ⚽ Team Sheet
-            </h1>
-            <p style={{ margin: 0, fontSize: 11, color: '#4a6b8a', marginTop: 1 }}>
-              {players.length} players · {benchSize > 0 ? `${benchSize} bench · ` : ''}9v9 · 2×25 min
-              {lockGK ? ' · GK full game' : ' · GK rotates HT'}
-              {hasEdits && <span style={{ color: '#b45309' }}> · ✏️ edited</span>}
-            </p>
-          </div>
-
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
-            {tab === 'field' && (
-              <button
-                onClick={toggleEdit}
-                style={{
-                  background: editMode ? '#ddeeff' : '#f5f9ff',
-                  border: `1px solid ${editMode ? '#1d6fcf' : '#c7daf7'}`,
-                  borderRadius: 8, color: editMode ? '#1558b0' : '#7a96b0',
-                  padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                  boxShadow: editMode ? '0 0 12px rgba(37,99,235,0.2)' : 'none',
-                  transition: 'all 0.2s',
-                }}>
-                ✏️ {editMode ? 'Editing' : 'Edit'}
-              </button>
-            )}
-            <button
-              onClick={() => setSaveOpen(o => !o)}
-              style={{
-                background: saveOpen ? '#ecfdf5' : '#ffffff',
-                border: `1px solid ${saveOpen ? '#059669' : '#c7daf7'}`,
-                borderRadius: 8, color: saveOpen ? '#059669' : '#7a96b0',
-                padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-              }}>
-              💾 {isSaved ? 'Saved ✓' : 'Save'}
-            </button>
-            <button
-              onClick={onGoSeason}
-              style={{
-                background: '#ffffff', border: '1px solid #c7daf7', borderRadius: 8,
-                color: '#7a96b0', padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-              }}>
-              📅 {seasonGames.length}
-            </button>
-            {seasonGames.length > 0 && (
-              <button
-                onClick={onReorder}
-                style={{
-                  background: '#ffffff', border: '1px solid #1d6fcf', borderRadius: 8,
-                  color: '#1d6fcf', padding: '6px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-                }}>
-                🔀
-              </button>
-            )}
-            <button
-              onClick={onGoSetup}
-              style={{
-                background: '#ffffff', border: '1px solid #c7daf7', borderRadius: 8,
-                color: '#7a96b0', padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-              }}>
-              ← Players
-            </button>
+      {/* ── Coach's Script Modal ── */}
+      {showScript && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200, padding: 20 }}>
+          <div style={{ background: '#fff', padding: 32, borderRadius: 24, width: '100%', maxWidth: 600 }}>
+            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginBottom: 20 }}>📋 Next Sub Script</h2>
+            <ul style={{ fontSize: 20, fontWeight: 700, color: '#4a6b8a', lineHeight: 1.8, listStyle: 'none', padding: 0 }}>
+              {upcomingSubs.map((sub, idx) => (
+                <li key={idx} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '2px solid #e2ecfc' }}>
+                  <span style={{ color: '#059669' }}>{sub.on}</span> you are on for <span style={{ color: '#dc2626' }}>{sub.off || 'nobody'}</span> at <strong>{sub.pos}</strong>.
+                </li>
+              ))}
+              {upcomingSubs.length === 0 && <li>No substitutions queued.</li>}
+            </ul>
+            <button onClick={() => setShowScript(false)} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', marginTop: 16 }}>Got It</button>
           </div>
         </div>
+      )}
 
-        {/* ── Half indicator pills ── */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          {[1, 2].map(h => {
-            const active = seg?.half === h;
-            return (
-              <div
-                key={h}
-                style={{
-                  padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                  background: active ? '#059669' : '#ffffff',
-                  color: active ? '#ffffff' : '#4a6b8a',
-                  border: `1px solid ${active ? '#059669' : '#c7daf7'}`,
-                  transition: 'all 0.2s',
-                }}
-              >
-                {h === 1 ? '① First Half 0–25 min' : '② Second Half 25–50 min'}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* ── Save panel ── */}
-        {saveOpen && (
-          <div style={{
-            marginBottom: 12, background: '#ffffff',
-            border: '1px solid #059669', borderRadius: 12, padding: '14px 16px',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>💾 Save this game to season</div>
-              <button
-                onClick={() => setSaveOpen(false)}
-                style={{ padding: '3px 9px', background: '#fff', border: '1px solid #c7daf7', borderRadius: 6, color: '#7a96b0', fontSize: 12, cursor: 'pointer' }}>
-                ✕
-              </button>
-            </div>
-
-            {/* Match label */}
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a', letterSpacing: 1, marginBottom: 5 }}>MATCH LABEL</div>
-              <input
-                value={matchLabel}
-                onChange={e => setMatchLabel(e.target.value)}
-                placeholder="Optional (e.g. vs Eastside FC)"
-                style={{
-                  width: '100%', background: '#fff', border: '1px solid #c7daf7',
-                  borderRadius: 8, padding: '8px 12px', color: '#0f2d5a',
-                  fontSize: 12, outline: 'none', fontFamily: 'inherit',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            {/* POTM */}
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a', letterSpacing: 1, marginBottom: 5 }}>⭐ PLAYER OF THE MATCH</div>
-              <select
-                value={potm}
-                onChange={e => setPotm(e.target.value)}
-                style={{
-                  width: '100%', background: '#fff', border: '1px solid #c7daf7',
-                  borderRadius: 8, padding: '8px 12px',
-                  color: potm ? '#92400e' : '#4a6b8a',
-                  fontSize: 12, outline: 'none', fontFamily: 'inherit', cursor: 'pointer',
-                  boxSizing: 'border-box',
-                }}
-              >
-                <option value="">— None —</option>
-                {players.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-
-            {/* Goals — pre-populated from live tracking */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a', letterSpacing: 1, marginBottom: 6 }}>⚽ GOALS SCORED</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                {players.map(p => (
-                  <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{
-                      fontSize: 11, color: '#4a6b8a', flex: 1,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{p}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-                      <button
-                        onClick={() => setGoals(g => ({ ...g, [p]: Math.max(0, (g[p] || 0) - 1) }))}
-                        style={{ width: 24, height: 24, borderRadius: 5, background: '#f5f9ff', border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 13, cursor: 'pointer', lineHeight: 1 }}>−</button>
-                      <span style={{
-                        fontSize: 12, fontWeight: 700, minWidth: 16, textAlign: 'center',
-                        color: (goals[p] || 0) > 0 ? '#d97706' : '#c7daf7',
-                      }}>{goals[p] || 0}</span>
-                      <button
-                        onClick={() => setGoals(g => ({ ...g, [p]: (g[p] || 0) + 1 }))}
-                        style={{ width: 24, height: 24, borderRadius: 5, background: '#f5f9ff', border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 13, cursor: 'pointer', lineHeight: 1 }}>+</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={handleSave}
-              style={{
-                width: '100%', padding: 12,
-                background: 'linear-gradient(135deg, #059669, #10b981)',
-                border: 'none', borderRadius: 10, color: '#fff',
-                fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              }}>
-              {isSaved ? '💾 Save Changes' : '💾 Save to Season'}
-            </button>
-          </div>
-        )}
-
-        {/* ── Tab bar ── */}
-        <div style={{
-          display: 'flex', gap: 4, marginBottom: 10,
-          background: '#ffffff', borderRadius: 10, padding: 4,
-          border: '1px solid #e2ecfc',
-        }}>
-          {[['field', '⚽ Field'], ['schedule', '📋 Schedule'], ['stats', '📊 Stats']].map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => { setTab(id); setSwapFrom(null); }}
-              style={{
-                flex: 1, padding: '7px 4px', borderRadius: 8, border: 'none',
-                background: tab === id ? 'linear-gradient(135deg, #1558b0, #1d6fcf)' : 'transparent',
-                color: tab === id ? '#fff' : '#4a6b8a',
-                fontSize: 12, fontWeight: 700, cursor: 'pointer',
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* ══ FIELD TAB ══ */}
-        {tab === 'field' && seg && (
-          <>
-            {/* Timeline (only when multiple segments) */}
-            {segments.length > 1 && renderTimeline()}
-
-            {/* Left panel + Field */}
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              {renderLeftPanel()}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <FieldView
-                  assignment={seg.assignment}
-                  highlight={editMode ? null : highlight}
-                  swapFrom={editMode ? swapFrom : null}
-                  onPlayerClick={handleFieldClick}
-                  upcomingSubs={editMode ? [] : upcomingSubs}
-                />
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ══ SCHEDULE TAB ══ */}
-        {tab === 'schedule' && renderScheduleTab()}
-
-        {/* ══ STATS TAB ══ */}
-        {tab === 'stats' && renderStatsTab()}
-
-      </div>
+      {/* ── 5. Post-Game Footer ── */}
+      <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7' }}>
+        <button onClick={() => onSave({ stats: matchStats })} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+          📊 SAVE GAME & VIEW SEASON TRACKER
+        </button>
+      </footer>
     </div>
   );
 }
