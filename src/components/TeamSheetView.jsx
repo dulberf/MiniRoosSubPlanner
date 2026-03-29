@@ -402,12 +402,21 @@ export default function TeamSheetView({
       )}
 
       {/* ── 5. Post-Game Footer ── */}
-      <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7' }}>
-        <button 
-          onClick={() => setSaveOpen(true)} 
-          style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
-          📊 REVIEW & SAVE GAME
-        </button>
+      <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7', display: 'flex', gap: 12 }}>
+        {isSaved ? (
+           <>
+             <button onClick={() => setSaveOpen(true)} style={{ flex: 1, padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+               ✏️ EDIT SAVED DATA
+             </button>
+             <button onClick={onGoSetup} style={{ flex: 2, padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', boxShadow: '0 8px 24px rgba(29,111,207,0.3)' }}>
+               ➕ START NEW MATCH
+             </button>
+           </>
+        ) : (
+          <button onClick={() => setSaveOpen(true)} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+            📊 REVIEW & SAVE GAME
+          </button>
+        )}
       </footer>
     </div>
   );

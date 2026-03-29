@@ -430,6 +430,7 @@ export default function App() {
         onDeleteGame={handleDeleteGame}
         onClearAll={handleClearAll}
         onUpdateGame={handleUpdateGame}
+        onGoSetup={() => { setSegments(null); setView('setup'); }}
       />
     );
   }
