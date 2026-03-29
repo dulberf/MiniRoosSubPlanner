@@ -11,6 +11,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   const [editIdx, setEditIdx]           = useState(null); // game index being edited
   const [expandedIdx, setExpandedIdx]   = useState(null); // expanded game card
   const [editGoals, setEditGoals]       = useState({});
+  const [editAssists, setEditAssists]   = useState({});
   const [editPotm, setEditPotm]         = useState('');
   const [importMsg, setImportMsg]       = useState(null);
   const importRef                       = useRef(null);
@@ -70,7 +71,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   // ── Season totals ─────────────────────────────────────────────────────────
   const allPlayers  = [...new Set(seasonGames.flatMap(g => g.players))];
   const totals      = Object.fromEntries(allPlayers.map(p => [p, {
-    minutes: 0, benchSegs: 0, gkGames: 0, games: 0, goals: 0, potm: 0,
+    minutes: 0, benchSegs: 0, gkGames: 0, games: 0, goals: 0, assists: 0, potm: 0,
     posCount: {},
   }]));
 
@@ -89,11 +90,13 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
       }
     });
     if (game.goals) Object.entries(game.goals).forEach(([p, n]) => { if (totals[p]) totals[p].goals += n; });
+    if (game.assists) Object.entries(game.assists).forEach(([p, n]) => { if (totals[p]) totals[p].assists += n; });
     if (game.potm && totals[game.potm]) totals[game.potm].potm++;
   });
 
-  const maxMins  = Math.max(...allPlayers.map(p => totals[p]?.minutes || 0));
-  const maxGoals = Math.max(...allPlayers.map(p => totals[p]?.goals   || 0));
+  const maxMins    = Math.max(...allPlayers.map(p => totals[p]?.minutes || 0));
+  const maxGoals   = Math.max(...allPlayers.map(p => totals[p]?.goals   || 0));
+  const maxAssists = Math.max(...allPlayers.map(p => totals[p]?.assists || 0));
 
   // ── Empty state ───────────────────────────────────────────────────────────
   if (seasonGames.length === 0) return (
@@ -222,6 +225,34 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                 </div>
               </div>
 
+              {/* Assists */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
+                              letterSpacing: 1, marginBottom: 6 }}>🅰️ ASSISTS</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {seasonGames[editIdx].players.map(p => (
+                    <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: '#4a6b8a', flex: 1 }}>{p}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: Math.max(0, (a[p] || 0) - 1) }))}
+                          style={{ width: 28, height: 28, borderRadius: 6, background: '#f5f9ff',
+                                   border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 16,
+                                   cursor: 'pointer', lineHeight: 1 }}>−</button>
+                        <span style={{ fontSize: 14, fontWeight: 700,
+                                       color: (editAssists[p] || 0) > 0 ? '#059669' : '#7a96b0',
+                                       minWidth: 20, textAlign: 'center' }}>
+                          {editAssists[p] || 0}
+                        </span>
+                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: (a[p] || 0) + 1 }))}
+                          style={{ width: 28, height: 28, borderRadius: 6, background: '#f5f9ff',
+                                   border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 16,
+                                   cursor: 'pointer', lineHeight: 1 }}>+</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={() => setEditIdx(null)}
                   style={{ flex: 1, padding: 10, background: '#ffffff',
@@ -233,7 +264,10 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                     const goals = Object.fromEntries(
                       Object.entries(editGoals).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)])
                     );
-                    onUpdateGame(editIdx, { goals, potm: editPotm || null });
+                    const assists = Object.fromEntries(
+                      Object.entries(editAssists).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)])
+                    );
+                    onUpdateGame(editIdx, { goals, assists, potm: editPotm || null });
                     setEditIdx(null);
                   }}
                   style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg, #1558b0, #1d6fcf)',
@@ -306,7 +340,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    {['Player','Games','Minutes','Bench','GK games','Goals','POTM'].map(h => (
+                    {['Player','Games','Minutes','Bench','GK games','Goals','Assists','POTM'].map(h => (
                       <th key={h} style={{ textAlign: 'left', padding: '4px 8px',
                                            color: '#4a6b8a', fontWeight: 700,
                                            fontSize: 10, letterSpacing: 0.5,
@@ -358,6 +392,20 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                               <span style={{ color: '#c7daf7' }}>—</span>
                             )}
                           </td>
+                          <td style={{ padding: '5px 8px', borderBottom: '1px solid #e2ecfc' }}>
+                            {t.assists > 0 ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: '#059669', fontWeight: 700 }}>{t.assists}</span>
+                                <div style={{ flex: 1, height: 4, background: '#d1fae5', borderRadius: 2, minWidth: 30 }}>
+                                  <div style={{ height: '100%', borderRadius: 2, background: '#059669',
+                                                width: `${maxAssists > 0 ? (t.assists / maxAssists) * 100 : 0}%`,
+                                                transition: 'width 0.5s' }} />
+                                </div>
+                              </div>
+                            ) : (
+                              <span style={{ color: '#c7daf7' }}>—</span>
+                            )}
+                          </td>
                           <td style={{ padding: '5px 8px', color: '#d97706',
                                        borderBottom: '1px solid #e2ecfc' }}>
                             {t.potm > 0 ? `⭐ ×${t.potm}` : '—'}
@@ -379,6 +427,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
             const minMin = mins.length ? Math.min(...mins) : 0;
             const maxMin = mins.length ? Math.max(...mins) : 0;
             const goalTotal = Object.values(game.goals || {}).reduce((s, n) => s + n, 0);
+            const assistTotal = Object.values(game.assists || {}).reduce((s, n) => s + n, 0);
 
             return (
               <div key={idx} style={{ background: '#ffffff', borderRadius: 12,
@@ -399,6 +448,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                         {game.label || `Game ${idx + 1}`}
                         {game.potm && <span style={{ marginLeft: 6, fontSize: 11, color: '#d97706' }}>⭐ {game.potm}</span>}
                         {goalTotal > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: '#059669' }}>⚽ {goalTotal}</span>}
+                        {assistTotal > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: '#059669' }}>🅰️ {assistTotal}</span>}
                       </div>
                       <div style={{ fontSize: 10, color: '#7a96b0', marginTop: 1 }}>
                         {game.date} · {game.players.length} players
@@ -409,6 +459,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <button onClick={e => { e.stopPropagation();
                         setEditGoals(game.goals ? { ...game.goals } : {});
+                        setEditAssists(game.assists ? { ...game.assists } : {});
                         setEditPotm(game.potm || '');
                         setEditIdx(idx); }}
                       style={{ padding: '5px 10px', background: '#f5f9ff',
@@ -459,6 +510,9 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                             <span style={{ fontSize: 11, color: '#4a6b8a', flexShrink: 0 }}>{mins}m</span>
                             {(game.goals?.[p] || 0) > 0 && (
                               <span style={{ fontSize: 11, color: '#d97706' }}>⚽{game.goals[p]}</span>
+                            )}
+                            {(game.assists?.[p] || 0) > 0 && (
+                              <span style={{ fontSize: 11, color: '#059669' }}>🅰️{game.assists[p]}</span>
                             )}
                             {game.potm === p && <span style={{ fontSize: 11 }}>⭐</span>}
                           </div>

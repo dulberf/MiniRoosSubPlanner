@@ -331,7 +331,7 @@ export default function App() {
   }, []);
 
   // ── Save game to season
-  const handleSave = useCallback(({ label, goals, potm }) => {
+  const handleSave = useCallback(({ label, goals, assists, potm }) => {
     if (!segments) return;
     const stats = calcStats(segments, players);
     const now = new Date();
@@ -342,6 +342,7 @@ export default function App() {
       segments: segments.map(s => ({ ...s })),
       stats,
       goals:    goals || {},
+      assists:  assists || {},
       potm:     potm || null,
     };
 
