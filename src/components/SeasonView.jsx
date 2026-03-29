@@ -7,9 +7,9 @@ import { useState, useRef } from 'react';
 import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER, STORAGE_KEY } from '../constants.js';
 
 export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearAll, onUpdateGame }) {
-  const [confirmIdx, setConfirmIdx]     = useState(null); // index or 'all'
-  const [editIdx, setEditIdx]           = useState(null); // game index being edited
-  const [expandedIdx, setExpandedIdx]   = useState(null); // expanded game card
+  const [confirmIdx, setConfirmIdx]     = useState(null); 
+  const [editIdx, setEditIdx]           = useState(null); 
+  const [expandedIdx, setExpandedIdx]   = useState(null); 
   const [editGoals, setEditGoals]       = useState({});
   const [editAssists, setEditAssists]   = useState({});
   const [editPotm, setEditPotm]         = useState('');
@@ -100,251 +100,69 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
 
   // ── Empty state ───────────────────────────────────────────────────────────
   if (seasonGames.length === 0) return (
-    <div style={{ padding: 40, textAlign: 'center', color: '#4a6b8a' }}>
-      <div style={{ fontSize: 32, marginBottom: 12 }}>📅</div>
-      <div style={{ fontSize: 16, fontWeight: 600, color: '#7a96b0', marginBottom: 8 }}>
-        No games saved yet
+    <div style={{ padding: 40, textAlign: 'center', color: '#4a6b8a', minHeight: '100vh', background: '#f0f6ff', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ fontSize: 48, marginBottom: 12 }}>📅</div>
+      <div style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginBottom: 8 }}>
+        No Games Recorded Yet
       </div>
-      <div style={{ fontSize: 12, color: '#4a6b8a' }}>
-        Generate a team sheet and click "Save to Season" to start tracking
+      <div style={{ fontSize: 16, color: '#4a6b8a', fontWeight: 600 }}>
+        Play a game and hit "Save to Season" to build your dashboard.
       </div>
-      <button onClick={onBack} style={{ marginTop: 20, background: '#ffffff',
-        border: '1px solid #c7daf7', borderRadius: 8, color: '#7a96b0',
-        padding: '8px 18px', cursor: 'pointer', fontSize: 13 }}>
-        ← Back
+      <button onClick={onBack} style={{ marginTop: 24, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', padding: '16px 32px', cursor: 'pointer', fontSize: 18, fontWeight: 900, boxShadow: '0 8px 24px rgba(29,111,207,0.3)' }}>
+        ← Back to Match Setup
       </button>
     </div>
   );
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'radial-gradient(ellipse at 50% 0%, #d6e8ff 0%, #f0f6ff 70%)',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
-      padding: '14px 12px 40px',
-    }}>
-      <div style={{ maxWidth: 840, margin: '0 auto' }}>
+    <div style={{ minHeight: '100vh', background: '#f0f6ff', fontFamily: 'system-ui, sans-serif' }}>
+      
+      {/* ── Header ── */}
+      <header style={{ background: 'linear-gradient(135deg, #1d6fcf 0%, #0f2d5a 100%)', padding: '32px 24px 24px', textAlign: 'center', position: 'relative' }}>
+        <button onClick={onBack} style={{ position: 'absolute', left: 24, top: 32, background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', borderRadius: 12, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 16, fontWeight: 800 }}>
+          ← Back
+        </button>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>🏆</div>
+        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 900, color: '#fff', letterSpacing: -0.5 }}>
+          Season Dashboard
+        </h1>
+        <p style={{ margin: '8px 0 0', color: '#c7daf7', fontSize: 16, fontWeight: 600 }}>
+          {seasonGames.length} Game{seasonGames.length !== 1 ? 's' : ''} Recorded
+        </p>
 
-        {/* ── Confirm delete modal ── */}
-        {confirmIdx !== null && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-                        zIndex: 999, display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', padding: 20 }}>
-            <div style={{ background: '#ffffff', border: '1px solid #fca5a5',
-                          borderRadius: 14, padding: '24px 28px', maxWidth: 340,
-                          width: '100%', boxShadow: '0 16px 48px rgba(0,40,100,0.15)' }}>
-              <div style={{ fontSize: 22, marginBottom: 10, textAlign: 'center' }}>🗑</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f2d5a',
-                            marginBottom: 8, textAlign: 'center' }}>
-                {confirmIdx === 'all'
-                  ? 'Clear all saved games?'
-                  : `Delete Game ${confirmIdx + 1}${seasonGames[confirmIdx]?.label ? ` — ${seasonGames[confirmIdx].label}` : ''}?`}
-              </div>
-              <div style={{ fontSize: 12, color: '#4a6b8a', marginBottom: 20, textAlign: 'center' }}>
-                This cannot be undone.
-              </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => setConfirmIdx(null)}
-                  style={{ flex: 1, padding: 10, background: '#ffffff',
-                           border: '1px solid #c7daf7', borderRadius: 8,
-                           color: '#4a6b8a', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                  Cancel
-                </button>
-                <button onClick={() => {
-                    if (confirmIdx === 'all') {
-                      onClearAll();
-                    } else {
-                      if (expandedIdx === confirmIdx) setExpandedIdx(null);
-                      else if (expandedIdx > confirmIdx) setExpandedIdx(expandedIdx - 1);
-                      onDeleteGame(confirmIdx);
-                    }
-                    setConfirmIdx(null);
-                  }}
-                  style={{ flex: 1, padding: 10, background: '#fee2e2',
-                           border: '1px solid #f87171', borderRadius: 8,
-                           color: '#dc2626', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-                  {confirmIdx === 'all' ? 'Clear All' : 'Delete'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Edit goals / POTM modal ── */}
-        {editIdx !== null && seasonGames[editIdx] && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-                        zIndex: 999, display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', padding: 20 }}>
-            <div style={{ background: '#ffffff', border: '1px solid #1d6fcf',
-                          borderRadius: 14, padding: '22px 24px', maxWidth: 360,
-                          width: '100%', boxShadow: '0 16px 48px rgba(0,40,100,0.15)',
-                          maxHeight: '85vh', overflowY: 'auto' }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f2d5a', marginBottom: 16 }}>
-                ✏️ Edit Game {editIdx + 1}{seasonGames[editIdx].label ? ` — ${seasonGames[editIdx].label}` : ''}
-              </div>
-
-              {/* POTM */}
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
-                              letterSpacing: 1, marginBottom: 6 }}>⭐ PLAYER OF THE MATCH</div>
-                <select value={editPotm} onChange={e => setEditPotm(e.target.value)}
-                  style={{ width: '100%', background: '#ffffff', border: '1px solid #c7daf7',
-                           borderRadius: 8, padding: '8px 12px',
-                           color: editPotm ? '#92400e' : '#4a6b8a',
-                           fontSize: 12, outline: 'none', fontFamily: 'inherit', cursor: 'pointer' }}>
-                  <option value="">— None —</option>
-                  {seasonGames[editIdx].players.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-
-              {/* Goals */}
-              <div style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
-                              letterSpacing: 1, marginBottom: 6 }}>⚽ GOALS SCORED</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {seasonGames[editIdx].players.map(p => (
-                    <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, color: '#4a6b8a', flex: 1 }}>{p}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <button onClick={() => setEditGoals(g => ({ ...g, [p]: Math.max(0, (g[p] || 0) - 1) }))}
-                          style={{ width: 28, height: 28, borderRadius: 6, background: '#f5f9ff',
-                                   border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 16,
-                                   cursor: 'pointer', lineHeight: 1 }}>−</button>
-                        <span style={{ fontSize: 14, fontWeight: 700,
-                                       color: (editGoals[p] || 0) > 0 ? '#d97706' : '#7a96b0',
-                                       minWidth: 20, textAlign: 'center' }}>
-                          {editGoals[p] || 0}
-                        </span>
-                        <button onClick={() => setEditGoals(g => ({ ...g, [p]: (g[p] || 0) + 1 }))}
-                          style={{ width: 28, height: 28, borderRadius: 6, background: '#f5f9ff',
-                                   border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 16,
-                                   cursor: 'pointer', lineHeight: 1 }}>+</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Assists */}
-              <div style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
-                              letterSpacing: 1, marginBottom: 6 }}>🅰️ ASSISTS</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {seasonGames[editIdx].players.map(p => (
-                    <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, color: '#4a6b8a', flex: 1 }}>{p}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: Math.max(0, (a[p] || 0) - 1) }))}
-                          style={{ width: 28, height: 28, borderRadius: 6, background: '#f5f9ff',
-                                   border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 16,
-                                   cursor: 'pointer', lineHeight: 1 }}>−</button>
-                        <span style={{ fontSize: 14, fontWeight: 700,
-                                       color: (editAssists[p] || 0) > 0 ? '#059669' : '#7a96b0',
-                                       minWidth: 20, textAlign: 'center' }}>
-                          {editAssists[p] || 0}
-                        </span>
-                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: (a[p] || 0) + 1 }))}
-                          style={{ width: 28, height: 28, borderRadius: 6, background: '#f5f9ff',
-                                   border: '1px solid #c7daf7', color: '#4a6b8a', fontSize: 16,
-                                   cursor: 'pointer', lineHeight: 1 }}>+</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => setEditIdx(null)}
-                  style={{ flex: 1, padding: 10, background: '#ffffff',
-                           border: '1px solid #c7daf7', borderRadius: 8,
-                           color: '#4a6b8a', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                  Cancel
-                </button>
-                <button onClick={() => {
-                    const goals = Object.fromEntries(
-                      Object.entries(editGoals).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)])
-                    );
-                    const assists = Object.fromEntries(
-                      Object.entries(editAssists).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)])
-                    );
-                    onUpdateGame(editIdx, { goals, assists, potm: editPotm || null });
-                    setEditIdx(null);
-                  }}
-                  style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg, #1558b0, #1d6fcf)',
-                           border: 'none', borderRadius: 8, color: '#fff',
-                           fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-                  Save Changes
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Header ── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: '#0f2d5a' }}>
-              📅 Season Tracker
-            </h1>
-            <p style={{ margin: 0, fontSize: 11, color: '#4a6b8a' }}>
-              {seasonGames.length} game{seasonGames.length !== 1 ? 's' : ''} recorded
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button onClick={onBack}
-              style={{ background: '#ffffff', border: '1px solid #c7daf7', borderRadius: 8,
-                       color: '#7a96b0', padding: '7px 14px', cursor: 'pointer',
-                       fontSize: 12, fontWeight: 600 }}>
-              ← Back
-            </button>
-            <button onClick={() => setConfirmIdx('all')}
-              style={{ background: '#ffffff', border: '1px solid #fca5a5', borderRadius: 8,
-                       color: '#f87171', padding: '7px 14px', cursor: 'pointer',
-                       fontSize: 12, fontWeight: 600 }}>
-              🗑 Clear All
-            </button>
-            <button onClick={handleExport}
-              style={{ background: '#ffffff', border: '1px solid #059669', borderRadius: 8,
-                       color: '#059669', padding: '7px 14px', cursor: 'pointer',
-                       fontSize: 12, fontWeight: 600 }}>
-              📤 Export
-            </button>
-            <label style={{ background: '#ffffff', border: '1px solid #1d6fcf', borderRadius: 8,
-                            color: '#1d6fcf', padding: '7px 14px', cursor: 'pointer',
-                            fontSize: 12, fontWeight: 600, display: 'inline-block' }}>
-              📥 Import
-              <input ref={importRef} type="file" accept=".json"
-                     onChange={handleImport} style={{ display: 'none' }} />
-            </label>
-          </div>
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24, flexWrap: 'wrap' }}>
+          <button onClick={handleExport} style={{ background: '#059669', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800 }}>
+            📤 Export Backup
+          </button>
+          <label style={{ background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800, display: 'inline-block' }}>
+            📥 Import Backup
+            <input ref={importRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+          </label>
+          <button onClick={() => setConfirmIdx('all')} style={{ background: '#dc2626', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800 }}>
+            🗑 Reset Season
+          </button>
         </div>
+      </header>
 
-        {importMsg && (
-          <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10,
-                        background: importMsg.type === 'err' ? '#fee2e2' : '#ecfdf5',
-                        border: `1px solid ${importMsg.type === 'err' ? '#f87171' : '#059669'}`,
-                        color: importMsg.type === 'err' ? '#b91c1c' : '#059669',
-                        fontSize: 13, fontWeight: 700, textAlign: 'center' }}>
-            {importMsg.msg}
-          </div>
-        )}
+      {importMsg && (
+        <div style={{ margin: '16px auto', maxWidth: 840, padding: '12px 16px', borderRadius: 12, background: importMsg.type === 'err' ? '#fee2e2' : '#ecfdf5', border: `2px solid ${importMsg.type === 'err' ? '#f87171' : '#059669'}`, color: importMsg.type === 'err' ? '#b91c1c' : '#059669', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>
+          {importMsg.msg}
+        </div>
+      )}
 
-        {/* ── Season Totals table ── */}
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px 60px' }}>
+
+        {/* ── Season Totals Leaderboard ── */}
         {allPlayers.length > 0 && (
-          <div style={{ background: '#ffffff', borderRadius: 12, padding: '16px 18px',
-                        border: '1px solid #c7daf7', marginBottom: 16 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#4a6b8a',
-                          letterSpacing: 1, marginBottom: 12 }}>SEASON TOTALS</div>
+          <div style={{ background: '#ffffff', borderRadius: 20, padding: '24px', border: '3px solid #e2ecfc', marginBottom: 32, boxShadow: '0 10px 30px rgba(15,45,90,0.05)' }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginBottom: 16 }}>LEADERBOARD & FAIRNESS TRACKER</div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead>
                   <tr>
-                    {['Player','Games','Minutes','Bench','GK games','Goals','Assists','POTM'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '4px 8px',
-                                           color: '#4a6b8a', fontWeight: 700,
-                                           fontSize: 10, letterSpacing: 0.5,
-                                           borderBottom: '1px solid #e2ecfc' }}>
+                    {['Player','Games','Total Minutes','Goals','Assists','POTM','Bench','GK'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontWeight: 800, fontSize: 12, borderBottom: '3px solid #e2ecfc', whiteSpace: 'nowrap' }}>
                         {h}
                       </th>
                     ))}
@@ -357,59 +175,50 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                       const t = totals[p];
                       return (
                         <tr key={p}>
-                          <td style={{ padding: '5px 8px', color: '#0f2d5a', fontWeight: 600,
-                                       borderBottom: '1px solid #e2ecfc' }}>
+                          <td style={{ padding: '12px', color: '#0f2d5a', fontWeight: 900, borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap' }}>
                             {p}{t.potm > 0 ? ' ⭐' : ''}
                           </td>
-                          <td style={{ padding: '5px 8px', color: '#4a6b8a',
-                                       borderBottom: '1px solid #e2ecfc' }}>{t.games}</td>
-                          <td style={{ padding: '5px 8px', borderBottom: '1px solid #e2ecfc' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span style={{ color: '#0f2d5a', fontWeight: 600 }}>{t.minutes}m</span>
-                              <div style={{ flex: 1, height: 4, background: '#e2ecfc', borderRadius: 2, minWidth: 40 }}>
-                                <div style={{ height: '100%', borderRadius: 2,
-                                              background: '#1d6fcf',
-                                              width: `${maxMins > 0 ? (t.minutes / maxMins) * 100 : 0}%`,
-                                              transition: 'width 0.5s' }} />
+                          <td style={{ padding: '12px', color: '#64748b', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.games}</td>
+                          
+                          {/* Thick Minutes Bar */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 160 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <span style={{ color: '#0f2d5a', fontWeight: 800, width: 40 }}>{t.minutes}m</span>
+                              <div style={{ flex: 1, height: 8, background: '#e2ecfc', borderRadius: 4 }}>
+                                <div style={{ height: '100%', borderRadius: 4, background: '#1d6fcf', width: `${maxMins > 0 ? (t.minutes / maxMins) * 100 : 0}%`, transition: 'width 0.5s' }} />
                               </div>
                             </div>
                           </td>
-                          <td style={{ padding: '5px 8px', color: '#b45309',
-                                       borderBottom: '1px solid #e2ecfc' }}>{t.benchSegs}</td>
-                          <td style={{ padding: '5px 8px', color: '#7c3aed',
-                                       borderBottom: '1px solid #e2ecfc' }}>{t.gkGames}</td>
-                          <td style={{ padding: '5px 8px', borderBottom: '1px solid #e2ecfc' }}>
+
+                          {/* Goals Bar */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 120 }}>
                             {t.goals > 0 ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{ color: '#d97706', fontWeight: 700 }}>{t.goals} ⚽</span>
-                                <div style={{ flex: 1, height: 4, background: '#fef3c7', borderRadius: 2, minWidth: 30 }}>
-                                  <div style={{ height: '100%', borderRadius: 2, background: '#f59e0b',
-                                                width: `${maxGoals > 0 ? (t.goals / maxGoals) * 100 : 0}%`,
-                                                transition: 'width 0.5s' }} />
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ color: '#d97706', fontWeight: 900, width: 24 }}>{t.goals}</span>
+                                <div style={{ flex: 1, height: 8, background: '#fef3c7', borderRadius: 4 }}>
+                                  <div style={{ height: '100%', borderRadius: 4, background: '#f59e0b', width: `${maxGoals > 0 ? (t.goals / maxGoals) * 100 : 0}%`, transition: 'width 0.5s' }} />
                                 </div>
                               </div>
-                            ) : (
-                              <span style={{ color: '#c7daf7' }}>—</span>
-                            )}
+                            ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
                           </td>
-                          <td style={{ padding: '5px 8px', borderBottom: '1px solid #e2ecfc' }}>
+
+                          {/* Assists Bar */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 120 }}>
                             {t.assists > 0 ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{ color: '#059669', fontWeight: 700 }}>{t.assists}</span>
-                                <div style={{ flex: 1, height: 4, background: '#d1fae5', borderRadius: 2, minWidth: 30 }}>
-                                  <div style={{ height: '100%', borderRadius: 2, background: '#059669',
-                                                width: `${maxAssists > 0 ? (t.assists / maxAssists) * 100 : 0}%`,
-                                                transition: 'width 0.5s' }} />
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ color: '#059669', fontWeight: 900, width: 24 }}>{t.assists}</span>
+                                <div style={{ flex: 1, height: 8, background: '#d1fae5', borderRadius: 4 }}>
+                                  <div style={{ height: '100%', borderRadius: 4, background: '#059669', width: `${maxAssists > 0 ? (t.assists / maxAssists) * 100 : 0}%`, transition: 'width 0.5s' }} />
                                 </div>
                               </div>
-                            ) : (
-                              <span style={{ color: '#c7daf7' }}>—</span>
-                            )}
+                            ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
                           </td>
-                          <td style={{ padding: '5px 8px', color: '#d97706',
-                                       borderBottom: '1px solid #e2ecfc' }}>
-                            {t.potm > 0 ? `⭐ ×${t.potm}` : '—'}
+
+                          <td style={{ padding: '12px', color: '#d97706', fontWeight: 900, borderBottom: '1px solid #e2ecfc' }}>
+                            {t.potm > 0 ? `⭐ ×${t.potm}` : <span style={{ color: '#cbd5e1' }}>—</span>}
                           </td>
+                          <td style={{ padding: '12px', color: '#64748b', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.benchSegs}</td>
+                          <td style={{ padding: '12px', color: '#7c3aed', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.gkGames}</td>
                         </tr>
                       );
                     })}
@@ -419,8 +228,9 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
           </div>
         )}
 
-        {/* ── Game list ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* ── Game History Cards ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginLeft: 8 }}>MATCH HISTORY</div>
           {seasonGames.map((game, idx) => {
             const isExpanded = expandedIdx === idx;
             const mins = Object.values(game.stats?.minutesMap || {});
@@ -430,91 +240,59 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
             const assistTotal = Object.values(game.assists || {}).reduce((s, n) => s + n, 0);
 
             return (
-              <div key={idx} style={{ background: '#ffffff', borderRadius: 12,
-                                      border: '1px solid #c7daf7', overflow: 'hidden' }}>
-                {/* Game header row */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                              padding: '12px 16px', cursor: 'pointer', gap: 8 }}
-                     onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 8,
-                                  background: 'linear-gradient(135deg, #1558b0, #1d6fcf)',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  fontSize: 12, fontWeight: 800, color: '#fff', flexShrink: 0 }}>
-                      {idx + 1}
+              <div key={idx} style={{ background: '#ffffff', borderRadius: 16, border: '3px solid #e2ecfc', overflow: 'hidden', transition: 'all 0.2s', boxShadow: isExpanded ? '0 12px 30px rgba(15,45,90,0.1)' : 'none' }}>
+                
+                {/* Game Header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', cursor: 'pointer', background: isExpanded ? '#f8fafc' : '#fff', flexWrap: 'wrap', gap: 12 }} onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, background: 'linear-gradient(135deg, #1d6fcf, #0f2d5a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 900, color: '#fff', flexShrink: 0 }}>
+                      #{idx + 1}
                     </div>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#0f2d5a' }}>
-                        {game.label || `Game ${idx + 1}`}
-                        {game.potm && <span style={{ marginLeft: 6, fontSize: 11, color: '#d97706' }}>⭐ {game.potm}</span>}
-                        {goalTotal > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: '#059669' }}>⚽ {goalTotal}</span>}
-                        {assistTotal > 0 && <span style={{ marginLeft: 6, fontSize: 11, color: '#059669' }}>🅰️ {assistTotal}</span>}
+                      <div style={{ fontSize: 18, fontWeight: 900, color: '#0f2d5a', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        {game.label || `Match ${idx + 1}`}
+                        {game.potm && <span style={{ padding: '4px 8px', background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#b45309' }}>⭐ {game.potm}</span>}
+                        {goalTotal > 0 && <span style={{ padding: '4px 8px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 12, color: '#047857' }}>⚽ {goalTotal} Goals</span>}
+                        {assistTotal > 0 && <span style={{ padding: '4px 8px', background: '#eff6ff', border: '2px solid #93c5fd', borderRadius: 8, fontSize: 12, color: '#1d4ed8' }}>🅰️ {assistTotal} Assists</span>}
                       </div>
-                      <div style={{ fontSize: 10, color: '#7a96b0', marginTop: 1 }}>
-                        {game.date} · {game.players.length} players
-                        {minMin === maxMin ? ` · ${minMin} min each` : ` · ${minMin}–${maxMin} min`}
+                      <div style={{ fontSize: 14, color: '#64748b', marginTop: 4, fontWeight: 600 }}>
+                        {game.date} · {game.players.length} Players {minMin === maxMin ? `· Perfectly Equal Time (${minMin}m)` : `· Spread: ${minMin}m – ${maxMin}m`}
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <button onClick={e => { e.stopPropagation();
-                        setEditGoals(game.goals ? { ...game.goals } : {});
-                        setEditAssists(game.assists ? { ...game.assists } : {});
-                        setEditPotm(game.potm || '');
-                        setEditIdx(idx); }}
-                      style={{ padding: '5px 10px', background: '#f5f9ff',
-                               border: '1px solid #c7daf7', borderRadius: 6,
-                               color: '#4a6b8a', fontSize: 11, cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
                       ✏️ Edit
                     </button>
-                    <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }}
-                      style={{ padding: '5px 10px', background: '#fff5f5',
-                               border: '1px solid #fca5a5', borderRadius: 6,
-                               color: '#f87171', fontSize: 11, cursor: 'pointer' }}>
+                    <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }} style={{ padding: '8px 16px', background: '#fee2e2', border: 'none', borderRadius: 8, color: '#dc2626', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
                       🗑
                     </button>
-                    <span style={{ fontSize: 12, color: '#c7daf7' }}>{isExpanded ? '▲' : '▼'}</span>
                   </div>
                 </div>
 
-                {/* Expanded: player minutes */}
+                {/* Expanded Player Details */}
                 {isExpanded && (
-                  <div style={{ padding: '0 16px 14px', borderTop: '1px solid #e2ecfc' }}>
-                    <div style={{ paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ padding: '16px 20px', borderTop: '3px solid #e2ecfc', background: '#fff' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
                       {game.players.map(p => {
                         const mins = game.stats?.minutesMap?.[p] ?? 0;
                         const sched = game.stats?.playerSchedule?.[p] || [];
                         const positions = [...new Set(sched.filter(s => s && s !== 'BENCH'))];
-                        const wasGK = game.segments.some(seg => seg.assignment?.GK === p);
                         return (
-                          <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: '#0f2d5a', minWidth: 70 }}>{p}</span>
-                            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', flex: 1 }}>
-                              {positions.map(pos => (
-                                <span key={pos} style={{
-                                  display: 'inline-block', padding: '2px 6px', borderRadius: 4,
-                                  fontSize: 9, fontWeight: 700,
-                                  background: POS_BG[pos] || '#4a6b8a',
-                                  color: POS_TEXT[pos] || '#fff',
-                                  border: `1px solid ${POS_BORDER[pos] || 'transparent'}`,
-                                }}>
-                                  {pos}
-                                </span>
-                              ))}
-                              {sched.some(s => s === 'BENCH') && (
-                                <span style={{ display: 'inline-block', padding: '2px 6px',
-                                               borderRadius: 4, fontSize: 9, fontWeight: 700,
-                                               background: '#fef3c7', color: '#b45309' }}>BENCH</span>
-                              )}
+                          <div key={p} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: 12, border: '1px solid #cbd5e1' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                              <span style={{ fontSize: 14, fontWeight: 800, color: '#0f2d5a' }}>{p} {game.potm === p && '⭐'}</span>
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                {positions.map(pos => (
+                                  <span key={pos} style={{ padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 800, background: POS_BG[pos] || '#64748b', color: POS_TEXT[pos] || '#fff', border: `1px solid ${POS_BORDER[pos] || 'transparent'}` }}>{pos}</span>
+                                ))}
+                              </div>
                             </div>
-                            <span style={{ fontSize: 11, color: '#4a6b8a', flexShrink: 0 }}>{mins}m</span>
-                            {(game.goals?.[p] || 0) > 0 && (
-                              <span style={{ fontSize: 11, color: '#d97706' }}>⚽{game.goals[p]}</span>
-                            )}
-                            {(game.assists?.[p] || 0) > 0 && (
-                              <span style={{ fontSize: 11, color: '#059669' }}>🅰️{game.assists[p]}</span>
-                            )}
-                            {game.potm === p && <span style={{ fontSize: 11 }}>⭐</span>}
+                            <div style={{ display: 'flex', gap: 12, fontWeight: 800, fontSize: 14 }}>
+                              <span style={{ color: '#64748b' }}>{mins}m</span>
+                              {(game.goals?.[p] || 0) > 0 && <span style={{ color: '#d97706' }}>⚽ {game.goals[p]}</span>}
+                              {(game.assists?.[p] || 0) > 0 && <span style={{ color: '#059669' }}>🅰️ {game.assists[p]}</span>}
+                            </div>
                           </div>
                         );
                       })}
@@ -525,11 +303,107 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
             );
           })}
         </div>
-
-        <p style={{ textAlign: 'center', marginTop: 20, fontSize: 10, color: '#c7daf7' }}>
-          Ctrl+P to save as PDF for matchday
+        
+        {/* FIX: Re-added the print helper */}
+        <p style={{ textAlign: 'center', marginTop: 40, fontSize: 14, fontWeight: 700, color: '#7a96b0' }}>
+          🖨️ Press Ctrl+P (or Cmd+P) to save this dashboard as a PDF for matchday.
         </p>
+
       </div>
+
+      {/* ── Fat-Finger Edit Modal ── */}
+      {editIdx !== null && seasonGames[editIdx] && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#ffffff', borderRadius: 24, padding: '32px', maxWidth: 480, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 24 }}>
+              ✏️ Edit Game {editIdx + 1}
+            </h2>
+
+            {/* POTM */}
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>⭐ PLAYER OF THE MATCH</label>
+              <select value={editPotm} onChange={e => setEditPotm(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 800, color: editPotm ? '#d97706' : '#64748b', outline: 'none', cursor: 'pointer' }}>
+                <option value="">— None —</option>
+                {seasonGames[editIdx].players.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+
+            {/* Goals & Assists List */}
+            <div style={{ marginBottom: 32 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 12, letterSpacing: 1 }}>⚽ GOALS & 🅰️ ASSISTS</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {seasonGames[editIdx].players.map(p => (
+                  <div key={p} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: 12, border: '2px solid #e2ecfc', gap: 12 }}>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: '#0f2d5a', flex: '1 1 auto', minWidth: '80px' }}>{p}</span>
+                    
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                      {/* Goals Stepper */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: '#d97706' }}>⚽</span>
+                        <button onClick={() => setEditGoals(g => ({ ...g, [p]: Math.max(0, (g[p] || 0) - 1) }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#fff', border: '2px solid #fcd34d', color: '#d97706', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>−</button>
+                        <span style={{ fontSize: 18, fontWeight: 900, color: (editGoals[p] || 0) > 0 ? '#b45309' : '#cbd5e1', width: 24, textAlign: 'center' }}>{editGoals[p] || 0}</span>
+                        <button onClick={() => setEditGoals(g => ({ ...g, [p]: (g[p] || 0) + 1 }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#f59e0b', border: 'none', color: '#fff', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>+</button>
+                      </div>
+
+                      {/* Assists Stepper */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: '#059669' }}>🅰️</span>
+                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: Math.max(0, (a[p] || 0) - 1) }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#fff', border: '2px solid #6ee7b7', color: '#059669', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>−</button>
+                        <span style={{ fontSize: 18, fontWeight: 900, color: (editAssists[p] || 0) > 0 ? '#047857' : '#cbd5e1', width: 24, textAlign: 'center' }}>{editAssists[p] || 0}</span>
+                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: (a[p] || 0) + 1 }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#10b981', border: 'none', color: '#fff', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>+</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setEditIdx(null)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 16, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => {
+                  const goals = Object.fromEntries(Object.entries(editGoals).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
+                  const assists = Object.fromEntries(Object.entries(editAssists).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
+                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null });
+                  setEditIdx(null);
+                }} style={{ flex: 2, padding: 16, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
+                💾 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm Delete Modal ── */}
+      {confirmIdx !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#ffffff', borderRadius: 24, padding: '32px', maxWidth: 400, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>🗑️</div>
+            
+            {/* FIX: Restored the dynamic label so you know what you're deleting */}
+            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 12 }}>
+              {confirmIdx === 'all' 
+                ? 'Reset Entire Season?' 
+                : `Delete Match ${confirmIdx + 1}${seasonGames[confirmIdx]?.label ? ` (${seasonGames[confirmIdx].label})` : ''}?`}
+            </h2>
+            <p style={{ fontSize: 16, color: '#64748b', fontWeight: 600, marginBottom: 32 }}>This cannot be undone.</p>
+            
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setConfirmIdx(null)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 16, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => {
+                  if (confirmIdx === 'all') onClearAll();
+                  else {
+                    if (expandedIdx === confirmIdx) setExpandedIdx(null);
+                    else if (expandedIdx > confirmIdx) setExpandedIdx(expandedIdx - 1);
+                    onDeleteGame(confirmIdx);
+                  }
+                  setConfirmIdx(null);
+                }} style={{ flex: 1, padding: 16, background: '#dc2626', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
+                {confirmIdx === 'all' ? 'Reset All' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
