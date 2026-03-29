@@ -6,7 +6,7 @@
 import { useState, useRef } from 'react';
 import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER, STORAGE_KEY } from '../constants.js';
 
-export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearAll, onUpdateGame }) {
+export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearAll, onUpdateGame, onGoSetup }) {
   const [confirmIdx, setConfirmIdx]     = useState(null); 
   const [editIdx, setEditIdx]           = useState(null); 
   const [expandedIdx, setExpandedIdx]   = useState(null); 
@@ -133,6 +133,11 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
 
         {/* Action Buttons */}
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24, flexWrap: 'wrap' }}>
+          {onGoSetup && (
+            <button onClick={onGoSetup} style={{ background: '#f59e0b', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 900, boxShadow: '0 4px 12px rgba(245,158,11,0.3)' }}>
+              ➕ Start New Match
+            </button>
+          )}
           <button onClick={handleExport} style={{ background: '#059669', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800 }}>
             📤 Export Backup
           </button>
