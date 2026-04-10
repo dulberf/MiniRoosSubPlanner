@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import FieldView from './FieldView.jsx';
 import { calcStats } from '../scheduler.js';
 import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER } from '../constants.js';
