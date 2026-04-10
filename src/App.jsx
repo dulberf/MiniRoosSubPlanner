@@ -9,7 +9,7 @@ import TeamSheetView  from './components/TeamSheetView.jsx';
 import SeasonView     from './components/SeasonView.jsx';
 
 import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment } from './scheduler.js';
-import { STORAGE_KEY, DEFAULT_PLAYERS } from './constants.js';
+import { STORAGE_KEY, IN_PROGRESS_KEY, DEFAULT_PLAYERS } from './constants.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,16 @@ function loadSeason() {
 
 function saveSeason(games) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(games)); } catch {}
+}
+
+function saveInProgress(data) {
+  try { localStorage.setItem(IN_PROGRESS_KEY, JSON.stringify(data)); } catch {}
+}
+function loadInProgress() {
+  try { const raw = localStorage.getItem(IN_PROGRESS_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+function clearInProgress() {
+  try { localStorage.removeItem(IN_PROGRESS_KEY); } catch {}
 }
 
 // ── App ────────────────────────────────────────────────────────────────────
@@ -42,6 +52,15 @@ export default function App() {
   // ── Generated game state
   const [segments,    setSegments]    = useState(null);
   const [isSaved,     setIsSaved]     = useState(false);
+
+  // ── Crash recovery
+  const [resumeData,    setResumeData]    = useState(null);
+  const [initialSegData, setInitialSegData] = useState({ currentSeg: 0, matchStats: {} });
+
+  useEffect(() => {
+    const data = loadInProgress();
+    if (data?.segments) setResumeData(data);
+  }, []);
 
   // ── Game clock (source of truth for live countdown timer)
   //    segmentStartTime – Date.now() when the current period was started/resumed
@@ -86,11 +105,19 @@ export default function App() {
     if (players.length < 6) { showToast('Need at least 6 players!', 'err'); return; }
     if (players.length > 12) { showToast('Maximum 12 players.', 'err'); return; }
     const segs = buildSchedule(players, lockGK);
+    clearInProgress();
+    setInitialSegData({ currentSeg: 0, matchStats: {} });
     setSegments(segs);
     setIsSaved(false);
     setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: null, isRunning: false });
     setView('result');
   }, [players, lockGK, showToast]);
+
+  // ── In-progress save (called by TeamSheetView on segment change)
+  const handleProgressUpdate = useCallback((currentSeg, matchStats) => {
+    if (!segments) return;
+    saveInProgress({ segments, playersText, lockGK, currentSeg, matchStats });
+  }, [segments, playersText, lockGK]);
 
   // ── Season-smart reorder
   const handleReorder = useCallback(() => {
@@ -369,6 +396,7 @@ export default function App() {
     });
 
     setIsSaved(true);
+    clearInProgress();
     showToast(isSaved ? 'Changes saved ✓' : 'Saved to season ✓');
   }, [segments, players, isSaved, showToast]);
 
@@ -428,16 +456,49 @@ export default function App() {
 
   // ── Routing ───────────────────────────────────────────────────────────────
 
+  // Resume prompt — shown on top of whatever view is active
+  const resumePrompt = resumeData && (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.9)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 24 }}>
+      <div style={{ background: '#fff', borderRadius: 24, padding: 32, maxWidth: 420, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>⚽</div>
+        <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', margin: '0 0 12px' }}>Game in Progress</h2>
+        <p style={{ fontSize: 16, color: '#4a6b8a', fontWeight: 600, margin: '0 0 32px' }}>
+          You have an unfinished game from your last session. Do you want to resume it?
+        </p>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button onClick={() => { clearInProgress(); setResumeData(null); }} style={{ flex: 1, padding: 18, borderRadius: 12, background: '#f1f5f9', color: '#64748b', fontSize: 16, fontWeight: 800, border: 'none', cursor: 'pointer' }}>
+            Discard
+          </button>
+          <button onClick={() => {
+            setPlayersText(resumeData.playersText);
+            setLockGK(resumeData.lockGK);
+            setSegments(resumeData.segments);
+            setInitialSegData({ currentSeg: resumeData.currentSeg, matchStats: resumeData.matchStats || {} });
+            setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: resumeData.currentSeg, isRunning: false });
+            setIsSaved(false);
+            setView('result');
+            setResumeData(null);
+          }} style={{ flex: 2, padding: 18, borderRadius: 12, background: '#1d6fcf', color: '#fff', fontSize: 16, fontWeight: 900, border: 'none', cursor: 'pointer' }}>
+            Resume Game
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (view === 'season') {
     return (
-      <SeasonView
-        seasonGames={seasonGames}
-        onBack={() => setView(segments ? 'result' : 'setup')}
-        onDeleteGame={handleDeleteGame}
-        onClearAll={handleClearAll}
-        onUpdateGame={handleUpdateGame}
-        onGoSetup={() => { setSegments(null); setView('setup'); }}
-      />
+      <>
+        {resumePrompt}
+        <SeasonView
+          seasonGames={seasonGames}
+          onBack={() => setView(segments ? 'result' : 'setup')}
+          onDeleteGame={handleDeleteGame}
+          onClearAll={handleClearAll}
+          onUpdateGame={handleUpdateGame}
+          onGoSetup={() => { setSegments(null); setView('setup'); }}
+        />
+      </>
     );
   }
 
@@ -463,23 +524,29 @@ export default function App() {
         onResetClock={resetClock}
         onResetGame={resetGame}
         onSplitSegment={handleSplitSegment}
+        initialCurrentSeg={initialSegData.currentSeg}
+        initialMatchStats={initialSegData.matchStats}
+        onProgressUpdate={handleProgressUpdate}
       />
     );
   }
 
   // Default: setup view
   return (
-    <InputView
-      playersText={playersText}
-      setPlayersText={setPlayersText}
-      lockGK={lockGK}
-      setLockGK={setLockGK}
-      onGenerate={handleGenerate}
-      onReorder={handleReorder}
-      onGoSeason={() => setView('season')}
-      seasonGameCount={seasonGames.length}
-      onImport={handleLandingImport}
-      importMsg={importMsg}
-    />
+    <>
+      {resumePrompt}
+      <InputView
+        playersText={playersText}
+        setPlayersText={setPlayersText}
+        lockGK={lockGK}
+        setLockGK={setLockGK}
+        onGenerate={handleGenerate}
+        onReorder={handleReorder}
+        onGoSeason={() => setView('season')}
+        seasonGameCount={seasonGames.length}
+        onImport={handleLandingImport}
+        importMsg={importMsg}
+      />
+    </>
   );
 }

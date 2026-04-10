@@ -55,5 +55,8 @@ export const POS_LABEL = {
 // localStorage key for season data
 export const STORAGE_KEY = 'teamsheet_season';
 
+// localStorage key for in-progress game (crash recovery)
+export const IN_PROGRESS_KEY = 'teamsheet_in_progress';
+
 // Default player names shown in the textarea on first load
 export const DEFAULT_PLAYERS = `Avahna\nCara\nClara\nEllery\nGen\nGrace\nImogen\nIvy\nLuella\nMaddy\nLyla\nNoa`;

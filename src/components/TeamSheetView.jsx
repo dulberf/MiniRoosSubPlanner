@@ -33,18 +33,19 @@ function getSubChanges(prev, curr) {
   return changes;
 }
 
-export default function TeamSheetView({ 
+export default function TeamSheetView({
   players, segments, lockGK, seasonGames, onSwap, onSave, onReorder, onGoSeason, onGoSetup, isSaved, toast,
   gameClock = { isRunning: false, accumulatedMs: 0, currentSegIdx: null, segmentStartTime: null },
-  onStartPeriod, onPausePeriod, onSplitSegment, onAdvanceSegment, onNudgeClock, onResetClock, onResetGame
+  onStartPeriod, onPausePeriod, onSplitSegment, onAdvanceSegment, onNudgeClock, onResetClock, onResetGame,
+  initialCurrentSeg = 0, initialMatchStats = {}, onProgressUpdate,
 }) {
   const [tab, setTab] = useState('field');
-  const [currentSeg, setCurrentSeg] = useState(0);
+  const [currentSeg, setCurrentSeg] = useState(initialCurrentSeg);
   const [editMode, setEditMode] = useState(false);
   const [swapFrom, setSwapFrom] = useState(null);
-  
-  const [activePlayer, setActivePlayer] = useState(null); 
-  const [matchStats, setMatchStats] = useState({}); 
+
+  const [activePlayer, setActivePlayer] = useState(null);
+  const [matchStats, setMatchStats] = useState(initialMatchStats); 
   const [orientation, setOrientation] = useState('vertical'); 
   
   const [scriptModal, setScriptModal] = useState(null); 
@@ -101,6 +102,13 @@ export default function TeamSheetView({
     }
     return () => clearInterval(interval);
   }, [gameClock.isRunning]);
+
+  // Save in-progress state whenever the segment advances
+  const matchStatsRef = useRef(matchStats);
+  matchStatsRef.current = matchStats;
+  useEffect(() => {
+    if (onProgressUpdate) onProgressUpdate(currentSeg, matchStatsRef.current);
+  }, [currentSeg, onProgressUpdate]);
 
   const activeSegIdx = gameClock.currentSegIdx !== null ? gameClock.currentSegIdx : currentSeg;
   const activeSeg = segments[activeSegIdx];
