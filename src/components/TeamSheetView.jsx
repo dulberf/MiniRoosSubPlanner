@@ -53,6 +53,8 @@ export default function TeamSheetView({
   const [saveOpen, setSaveOpen] = useState(false);
   const [matchLabel, setMatchLabel] = useState('');
   const [potm, setPotm] = useState('');
+  const [ourScore, setOurScore] = useState('');
+  const [oppositionScore, setOppositionScore] = useState('');
 
   const [now, setNow] = useState(Date.now());
   const [showClockMenu, setShowClockMenu] = useState(false);
@@ -70,6 +72,11 @@ export default function TeamSheetView({
       .filter(c => c.type === 'sub')
       .map(c => ({ pos: c.pos, on: c.on, off: c.off }));
   }, [currentSeg, segments]);
+
+  const trackedGoals = useMemo(
+    () => Object.values(matchStats).reduce((s, st) => s + (st.goals || 0), 0),
+    [matchStats]
+  );
 
   const getSeasonStats = (playerName) => {
     let sGoals = 0;
@@ -372,6 +379,40 @@ export default function TeamSheetView({
               <input value={matchLabel} onChange={e => setMatchLabel(e.target.value)} placeholder="e.g. Grand Final vs Eastside" style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 600, boxSizing: 'border-box', outline: 'none' }} />
             </div>
 
+            {/* Game Result */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4a6b8a', marginBottom: 12, letterSpacing: 1 }}>GAME RESULT</label>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>OUR SCORE</div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={ourScore}
+                    onChange={e => setOurScore(e.target.value)}
+                    style={{ width: '100%', padding: '14px', borderRadius: 12, border: '3px solid #1d6fcf', fontSize: 28, fontWeight: 900, textAlign: 'center', boxSizing: 'border-box', color: '#0f2d5a', outline: 'none' }}
+                  />
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: '#4a6b8a', paddingBottom: 14, flexShrink: 0 }}>–</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>OPPOSITION</div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={oppositionScore}
+                    onChange={e => setOppositionScore(e.target.value)}
+                    placeholder="0"
+                    style={{ width: '100%', padding: '14px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 28, fontWeight: 900, textAlign: 'center', boxSizing: 'border-box', color: '#64748b', outline: 'none' }}
+                  />
+                </div>
+              </div>
+              {ourScore !== '' && Number(ourScore) !== trackedGoals && (
+                <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 10, background: '#fffbeb', border: '2px solid #fcd34d', color: '#b45309', fontSize: 13, fontWeight: 700 }}>
+                  ⚠️ {trackedGoals} goal{trackedGoals !== 1 ? 's' : ''} allocated to players but score shows {ourScore}. Tap a player to allocate — or save and come back later.
+                </div>
+              )}
+            </div>
+
             <div style={{ marginBottom: 32 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4a6b8a', marginBottom: 8, letterSpacing: 1 }}>⭐ PLAYER OF THE WEEK</label>
               <select value={potm} onChange={e => setPotm(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 600, boxSizing: 'border-box', background: '#fff', outline: 'none', cursor: 'pointer' }}>
@@ -389,7 +430,7 @@ export default function TeamSheetView({
                   if (stats.goals && stats.goals > 0) formattedGoals[p] = stats.goals;
                   if (stats.assists && stats.assists > 0) formattedAssists[p] = stats.assists;
                 });
-                onSave({ label: matchLabel, potm, goals: formattedGoals, assists: formattedAssists });
+                onSave({ label: matchLabel, potm, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null });
                 setSaveOpen(false);
                 onGoSeason();
               }} style={{ flex: 2, padding: 20, borderRadius: 12, background: '#059669', color: '#fff', fontSize: 16, fontWeight: 900, border: 'none', cursor: 'pointer' }}>
@@ -404,7 +445,7 @@ export default function TeamSheetView({
       <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7', display: 'flex', gap: 12 }}>
         {isSaved ? (
            <>
-             <button onClick={() => setSaveOpen(true)} style={{ flex: 1, padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+             <button onClick={() => { setSaveOpen(true); setOurScore(String(trackedGoals)); }} style={{ flex: 1, padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
                ✏️ EDIT SAVED DATA
              </button>
              <button onClick={onGoSetup} style={{ flex: 2, padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', boxShadow: '0 8px 24px rgba(29,111,207,0.3)' }}>
@@ -412,7 +453,7 @@ export default function TeamSheetView({
              </button>
            </>
         ) : (
-          <button onClick={() => setSaveOpen(true)} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+          <button onClick={() => { setSaveOpen(true); setOurScore(String(trackedGoals)); }} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
             📊 REVIEW & SAVE GAME
           </button>
         )}

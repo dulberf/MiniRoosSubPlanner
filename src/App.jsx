@@ -331,19 +331,25 @@ export default function App() {
   }, []);
 
   // ── Save game to season
-  const handleSave = useCallback(({ label, goals, assists, potm }) => {
+  const handleSave = useCallback(({ label, goals, assists, potm, ourScore, oppositionScore }) => {
     if (!segments) return;
     const stats = calcStats(segments, players);
     const now = new Date();
+    const result = (ourScore != null && oppositionScore != null)
+      ? (ourScore > oppositionScore ? 'W' : ourScore < oppositionScore ? 'L' : 'D')
+      : null;
     const game  = {
-      date:     `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`,
-      label:    label || '',
-      players:  [...players],
-      segments: segments.map(s => ({ ...s })),
+      date:           `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`,
+      label:          label || '',
+      players:        [...players],
+      segments:       segments.map(s => ({ ...s })),
       stats,
-      goals:    goals || {},
-      assists:  assists || {},
-      potm:     potm || null,
+      goals:          goals || {},
+      assists:        assists || {},
+      potm:           potm || null,
+      ourScore:       ourScore ?? null,
+      oppositionScore: oppositionScore ?? null,
+      result,
     };
 
     setSeasonGames(prev => {

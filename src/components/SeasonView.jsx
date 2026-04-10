@@ -10,9 +10,11 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   const [confirmIdx, setConfirmIdx]     = useState(null); 
   const [editIdx, setEditIdx]           = useState(null); 
   const [expandedIdx, setExpandedIdx]   = useState(null); 
-  const [editGoals, setEditGoals]       = useState({});
-  const [editAssists, setEditAssists]   = useState({});
-  const [editPotm, setEditPotm]         = useState('');
+  const [editGoals, setEditGoals]             = useState({});
+  const [editAssists, setEditAssists]         = useState({});
+  const [editPotm, setEditPotm]               = useState('');
+  const [editOurScore, setEditOurScore]       = useState('');
+  const [editOppScore, setEditOppScore]       = useState('');
   const [importMsg, setImportMsg]       = useState(null);
   const importRef                       = useRef(null);
 
@@ -94,6 +96,15 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
     if (game.potm && totals[game.potm]) totals[game.potm].potm++;
   });
 
+  // ── Season record (W/D/L) ─────────────────────────────────────────────────
+  const record = seasonGames.reduce((acc, g) => {
+    if (g.result === 'W') acc.w++;
+    else if (g.result === 'D') acc.d++;
+    else if (g.result === 'L') acc.l++;
+    return acc;
+  }, { w: 0, d: 0, l: 0 });
+  const hasRecord = record.w + record.d + record.l > 0;
+
   // Calculate true fairness metrics
   const maxAvgMins = Math.max(...allPlayers.map(p => totals[p].games > 0 ? totals[p].minutes / totals[p].games : 0));
   const maxGoals   = Math.max(...allPlayers.map(p => totals[p]?.goals   || 0));
@@ -158,6 +169,30 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
       )}
 
       <div style={{ maxWidth: 1000, margin: '0 auto', padding: '24px 16px 60px' }}>
+
+        {/* ── Season Record ── */}
+        {hasRecord && (
+          <div style={{ background: '#ffffff', borderRadius: 20, padding: '20px 24px', border: '3px solid #e2ecfc', marginBottom: 24, boxShadow: '0 10px 30px rgba(15,45,90,0.05)', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, flexShrink: 0 }}>SEASON RECORD</div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px', borderRadius: 14, background: '#ecfdf5', border: '3px solid #6ee7b7', minWidth: 64 }}>
+                <span style={{ fontSize: 28, fontWeight: 900, color: '#059669' }}>{record.w}</span>
+                <span style={{ fontSize: 11, fontWeight: 900, color: '#059669', letterSpacing: 1 }}>WIN{record.w !== 1 ? 'S' : ''}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px', borderRadius: 14, background: '#fffbeb', border: '3px solid #fcd34d', minWidth: 64 }}>
+                <span style={{ fontSize: 28, fontWeight: 900, color: '#b45309' }}>{record.d}</span>
+                <span style={{ fontSize: 11, fontWeight: 900, color: '#b45309', letterSpacing: 1 }}>DRAW{record.d !== 1 ? 'S' : ''}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px', borderRadius: 14, background: '#fee2e2', border: '3px solid #fca5a5', minWidth: 64 }}>
+                <span style={{ fontSize: 28, fontWeight: 900, color: '#dc2626' }}>{record.l}</span>
+                <span style={{ fontSize: 11, fontWeight: 900, color: '#dc2626', letterSpacing: 1 }}>LOSS{record.l !== 1 ? 'ES' : ''}</span>
+              </div>
+            </div>
+            <div style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 800, color: '#4a6b8a' }}>
+              {record.w + record.d + record.l} of {seasonGames.length} game{seasonGames.length !== 1 ? 's' : ''} with results
+            </div>
+          </div>
+        )}
 
         {/* ── Season Totals Leaderboard (FAIRNESS FIRST) ── */}
         {allPlayers.length > 0 && (
@@ -290,6 +325,10 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                     <div>
                       <div style={{ fontSize: 18, fontWeight: 900, color: '#0f2d5a', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                         {game.label || `Match ${idx + 1}`}
+                        {game.result === 'W' && <span style={{ padding: '4px 10px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#059669' }}>W</span>}
+                        {game.result === 'D' && <span style={{ padding: '4px 10px', background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#b45309' }}>D</span>}
+                        {game.result === 'L' && <span style={{ padding: '4px 10px', background: '#fee2e2', border: '2px solid #fca5a5', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#dc2626' }}>L</span>}
+                        {game.ourScore != null && game.oppositionScore != null && <span style={{ padding: '4px 10px', background: '#f8fafc', border: '2px solid #cbd5e1', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#0f2d5a' }}>{game.ourScore} – {game.oppositionScore}</span>}
                         {game.potm && <span style={{ padding: '4px 8px', background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#b45309' }}>⭐ {game.potm}</span>}
                         {goalTotal > 0 && <span style={{ padding: '4px 8px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 12, color: '#047857' }}>⚽ {goalTotal} Goals</span>}
                         {assistTotal > 0 && <span style={{ padding: '4px 8px', background: '#eff6ff', border: '2px solid #93c5fd', borderRadius: 8, fontSize: 12, color: '#1d4ed8' }}>🅰️ {assistTotal} Assists</span>}
@@ -300,7 +339,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
+                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditOurScore(game.ourScore != null ? String(game.ourScore) : ''); setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
                       ✏️ Edit
                     </button>
                     <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }} style={{ padding: '8px 16px', background: '#fee2e2', border: 'none', borderRadius: 8, color: '#dc2626', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
@@ -365,6 +404,22 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
               </select>
             </div>
 
+            {/* Score */}
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 12, letterSpacing: 1 }}>GAME RESULT</label>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>OUR SCORE</div>
+                  <input type="number" min="0" value={editOurScore} onChange={e => setEditOurScore(e.target.value)} placeholder="–" style={{ width: '100%', padding: '12px', borderRadius: 12, border: '3px solid #1d6fcf', fontSize: 24, fontWeight: 900, textAlign: 'center', boxSizing: 'border-box', color: '#0f2d5a', outline: 'none' }} />
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#4a6b8a', paddingBottom: 12, flexShrink: 0 }}>–</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>OPPOSITION</div>
+                  <input type="number" min="0" value={editOppScore} onChange={e => setEditOppScore(e.target.value)} placeholder="–" style={{ width: '100%', padding: '12px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 24, fontWeight: 900, textAlign: 'center', boxSizing: 'border-box', color: '#64748b', outline: 'none' }} />
+                </div>
+              </div>
+            </div>
+
             {/* Goals & Assists List */}
             <div style={{ marginBottom: 32 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 12, letterSpacing: 1 }}>⚽ GOALS & 🅰️ ASSISTS</label>
@@ -400,7 +455,10 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
               <button onClick={() => {
                   const goals = Object.fromEntries(Object.entries(editGoals).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
                   const assists = Object.fromEntries(Object.entries(editAssists).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
-                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null });
+                  const ourSc = editOurScore !== '' ? Number(editOurScore) : null;
+                  const oppSc = editOppScore !== '' ? Number(editOppScore) : null;
+                  const result = (ourSc != null && oppSc != null) ? (ourSc > oppSc ? 'W' : ourSc < oppSc ? 'L' : 'D') : null;
+                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, ourScore: ourSc, oppositionScore: oppSc, result });
                   setEditIdx(null);
                 }} style={{ flex: 2, padding: 16, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
                 💾 Save Changes
