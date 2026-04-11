@@ -232,6 +232,16 @@ export default function TeamSheetView({
     setSwapFrom(null);
   };
 
+  const handleMovePlayer = () => {
+    const isOnBench = seg.bench.includes(activePlayer);
+    const pos = !isOnBench
+      ? Object.entries(seg.assignment).find(([, n]) => n === activePlayer)?.[0]
+      : null;
+    setSwapFrom(isOnBench ? { type: 'bench', name: activePlayer } : { type: 'pos', pos, name: activePlayer });
+    setEditMode(true);
+    setActivePlayer(null);
+  };
+
   const handleEmergencySub = () => {
     if (!onSplitSegment) return setEditMode(true);
     const elapsedMinsForSplit = Math.floor(elapsedMs / 60000);
@@ -359,11 +369,16 @@ export default function TeamSheetView({
                {orientation === 'horizontal-right' ? '⬅️ Attacking Left' : 'Attacking Right ➡️'}
              </button>
           )}
-          <div style={{ width: '100%', maxWidth: isKidsView ? 800 : 550, opacity: isEffectivelyLocked ? 0.8 : 1 }}>
+          <div style={{ width: '100%', maxWidth: isKidsView ? 800 : 550, opacity: isEffectivelyLocked ? 0.8 : 1, ...(activePlayer ? { position: 'relative', zIndex: 99 } : {}) }}>
             <FieldView assignment={seg.assignment} highlight={activePlayer} swapFrom={editMode ? swapFrom : null} onPlayerClick={handleFieldClick} upcomingSubs={editMode ? [] : upcomingSubs} orientation={orientation} />
           </div>
         </div>
       </main>
+
+      {/* ── Backdrop: closes modal on tap outside panel or tokens ── */}
+      {activePlayer && (
+        <div onClick={() => setActivePlayer(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 98, background: 'rgba(0,0,0,0.001)', WebkitTapHighlightColor: 'transparent' }} />
+      )}
 
       {/* ── 4. Fat-Finger Bottom Panel ── */}
       {activePlayer && (() => {
@@ -379,7 +394,10 @@ export default function TeamSheetView({
                   <span>🏆 Season: {sGoals} Goals, {sAssists} Assists</span>
                 </div>
               </div>
-              <button onClick={() => setActivePlayer(null)} style={{ background: '#f1f5f9', border: 'none', padding: '10px 16px', borderRadius: 8, fontSize: 18, fontWeight: 800, color: '#64748b', cursor: 'pointer' }}>Close ✕</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={handleMovePlayer} style={{ padding: '10px 16px', borderRadius: 8, background: '#e2ecfc', border: '2px solid #1d6fcf', fontSize: 15, fontWeight: 800, color: '#1d6fcf', cursor: 'pointer' }}>🔀 Move Player</button>
+                <button onClick={() => setActivePlayer(null)} style={{ background: '#f1f5f9', border: 'none', padding: '10px 16px', borderRadius: 8, fontSize: 18, fontWeight: 800, color: '#64748b', cursor: 'pointer' }}>Close ✕</button>
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 24 }}>
