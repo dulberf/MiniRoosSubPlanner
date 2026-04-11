@@ -54,8 +54,26 @@ export default function TeamSheetView({
   const [saveOpen, setSaveOpen] = useState(false);
   const [matchLabel, setMatchLabel] = useState('');
   const [potm, setPotm] = useState('');
+  const [captain, setCaptain] = useState('');
   const [ourScore, setOurScore] = useState('');
   const [oppositionScore, setOppositionScore] = useState('');
+
+  // Suggest the captain from the last winning game (may not be in today's squad)
+  const suggestedCaptain = useMemo(() => {
+    for (let i = seasonGames.length - 1; i >= 0; i--) {
+      if (seasonGames[i].result === 'W' && seasonGames[i].captain) {
+        return seasonGames[i].captain;
+      }
+    }
+    return '';
+  }, [seasonGames]);
+
+  // Open save modal and pre-populate scores + captain suggestion
+  const openSaveModal = useCallback((initialScore) => {
+    setOurScore(initialScore);
+    setCaptain(suggestedCaptain);
+    setSaveOpen(true);
+  }, [suggestedCaptain]);
 
   const [now, setNow] = useState(Date.now());
   const [showClockMenu, setShowClockMenu] = useState(false);
@@ -485,12 +503,29 @@ export default function TeamSheetView({
               )}
             </div>
 
-            <div style={{ marginBottom: 32 }}>
+            <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4a6b8a', marginBottom: 8, letterSpacing: 1 }}>⭐ PLAYER OF THE WEEK</label>
               <select value={potm} onChange={e => setPotm(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 600, boxSizing: 'border-box', background: '#fff', outline: 'none', cursor: 'pointer' }}>
                 <option value="">— Select Player —</option>
                 {players.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
+            </div>
+
+            <div style={{ marginBottom: 32 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4a6b8a', marginBottom: 8, letterSpacing: 1 }}>🏅 CAPTAIN</label>
+              <select value={captain} onChange={e => setCaptain(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 600, boxSizing: 'border-box', background: '#fff', outline: 'none', cursor: 'pointer' }}>
+                <option value="">— Select Captain —</option>
+                {players.map(p => <option key={p} value={p}>{p}</option>)}
+                {/* If last win's captain isn't in today's squad, still show them */}
+                {suggestedCaptain && !players.includes(suggestedCaptain) && (
+                  <option value={suggestedCaptain}>{suggestedCaptain} (not in squad)</option>
+                )}
+              </select>
+              {suggestedCaptain && (
+                <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: '#4a6b8a' }}>
+                  💡 Suggested from last win
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 12 }}>
@@ -502,7 +537,7 @@ export default function TeamSheetView({
                   if (stats.goals && stats.goals > 0) formattedGoals[p] = stats.goals;
                   if (stats.assists && stats.assists > 0) formattedAssists[p] = stats.assists;
                 });
-                onSave({ label: matchLabel, potm, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null });
+                onSave({ label: matchLabel, potm, captain, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null });
                 setSaveOpen(false);
                 onGoSeason();
               }} style={{ flex: 2, padding: 20, borderRadius: 12, background: '#059669', color: '#fff', fontSize: 16, fontWeight: 900, border: 'none', cursor: 'pointer' }}>
@@ -517,7 +552,7 @@ export default function TeamSheetView({
       <footer style={{ padding: '16px 24px', background: '#fff', borderTop: '3px solid #c7daf7', display: 'flex', gap: 12 }}>
         {isSaved ? (
            <>
-             <button onClick={() => { setSaveOpen(true); setOurScore(String(trackedGoals)); }} style={{ flex: 1, padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+             <button onClick={() => openSaveModal(String(trackedGoals))} style={{ flex: 1, padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
                ✏️ EDIT SAVED DATA
              </button>
              <button onClick={onGoSetup} style={{ flex: 2, padding: 20, fontSize: 18, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', boxShadow: '0 8px 24px rgba(29,111,207,0.3)' }}>
@@ -525,7 +560,7 @@ export default function TeamSheetView({
              </button>
            </>
         ) : (
-          <button onClick={() => { setSaveOpen(true); setOurScore(String(trackedGoals)); }} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
+          <button onClick={() => openSaveModal(String(trackedGoals))} style={{ width: '100%', padding: 20, fontSize: 18, fontWeight: 900, background: '#f8fafc', color: '#4a6b8a', border: '4px solid #cbd5e1', borderRadius: 12, cursor: 'pointer' }}>
             📊 REVIEW & SAVE GAME
           </button>
         )}

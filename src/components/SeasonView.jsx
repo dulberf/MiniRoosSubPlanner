@@ -13,6 +13,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   const [editGoals, setEditGoals]             = useState({});
   const [editAssists, setEditAssists]         = useState({});
   const [editPotm, setEditPotm]               = useState('');
+  const [editCaptain, setEditCaptain]         = useState('');
   const [editOurScore, setEditOurScore]       = useState('');
   const [editOppScore, setEditOppScore]       = useState('');
   const [importMsg, setImportMsg]       = useState(null);
@@ -73,27 +74,41 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   // ── Season totals ─────────────────────────────────────────────────────────
   const allPlayers  = [...new Set(seasonGames.flatMap(g => g.players))];
   const totals      = Object.fromEntries(allPlayers.map(p => [p, {
-    minutes: 0, benchSegs: 0, gkGames: 0, games: 0, goals: 0, assists: 0, potm: 0,
-    posCount: {},
+    minutes: 0, benchMins: 0, gkH1: 0, gkH2: 0, games: 0, goals: 0, assists: 0, potm: 0,
+    captainGames: 0, posCount: {},
   }]));
 
   seasonGames.forEach(game => {
-    const { minutesMap, gkDutyMap, playerSchedule } = game.stats || {};
+    const { minutesMap, playerSchedule } = game.stats || {};
+
+    // Per-game GK by half (Sets avoid double-counting multi-seg halves)
+    const gkH1Set = new Set(
+      (game.segments || []).filter(s => s.half === 1).map(s => s.assignment?.GK).filter(Boolean)
+    );
+    const gkH2Set = new Set(
+      (game.segments || []).filter(s => s.half === 2).map(s => s.assignment?.GK).filter(Boolean)
+    );
+
     game.players.forEach(p => {
       if (!totals[p]) return;
       if (minutesMap?.[p] != null) {
-        totals[p].minutes   += minutesMap[p];
-        totals[p].benchSegs += (playerSchedule?.[p] || []).filter(s => s === 'BENCH').length;
-        totals[p].gkGames   += game.segments.some(seg => seg.assignment?.GK === p) ? 1 : 0;
-        totals[p].games     += 1;
+        totals[p].minutes += minutesMap[p];
+        totals[p].games   += 1;
+        if (gkH1Set.has(p)) totals[p].gkH1++;
+        if (gkH2Set.has(p)) totals[p].gkH2++;
+        // Bench minutes: sum duration of every segment where this player is on the bench
+        (game.segments || []).forEach(seg => {
+          if (seg.bench?.includes(p)) totals[p].benchMins += (seg.duration || 0);
+        });
         new Set((playerSchedule?.[p] || []).filter(s => s && s !== 'BENCH')).forEach(pos => {
           totals[p].posCount[pos] = (totals[p].posCount[pos] || 0) + 1;
         });
       }
     });
-    if (game.goals) Object.entries(game.goals).forEach(([p, n]) => { if (totals[p]) totals[p].goals += n; });
+    if (game.goals)   Object.entries(game.goals).forEach(([p, n]) => { if (totals[p]) totals[p].goals += n; });
     if (game.assists) Object.entries(game.assists).forEach(([p, n]) => { if (totals[p]) totals[p].assists += n; });
-    if (game.potm && totals[game.potm]) totals[game.potm].potm++;
+    if (game.potm    && totals[game.potm])    totals[game.potm].potm++;
+    if (game.captain && totals[game.captain]) totals[game.captain].captainGames++;
   });
 
   // ── Season record (W/D/L) ─────────────────────────────────────────────────
@@ -203,7 +218,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                 <thead>
                   <tr>
                     {/* Fairness metrics brought to the front */}
-                    {['Player','Games','Mins / Game','Bench','GK Duty','Goals','Assists','POTM'].map(h => (
+                    {['Player','Games','Mins / Game','Bench','GK H1','GK H2','Goals','Assists','POTM','Captain','Top Positions'].map(h => (
                       <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontWeight: 800, fontSize: 12, borderBottom: '3px solid #e2ecfc', whiteSpace: 'nowrap' }}>
                         {h}
                       </th>
@@ -231,17 +246,14 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
 
                       return (
                         <tr key={p}>
-                          {/* Player & Positions */}
+                          {/* Player name */}
                           <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap' }}>
                             <div style={{ color: '#0f2d5a', fontWeight: 900, fontSize: 16 }}>{p}{t.potm > 0 ? ' ⭐' : ''}</div>
-                            <div style={{ color: '#64748b', fontWeight: 700, fontSize: 11, marginTop: 4 }}>
-                              Played: {topPositions || 'None'}
-                            </div>
                           </td>
 
                           {/* Attendance */}
                           <td style={{ padding: '12px', color: '#64748b', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.games}</td>
-                          
+
                           {/* TRUE Fairness Metric: Avg Minutes per Game */}
                           <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 160 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -252,17 +264,24 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                             </div>
                           </td>
 
-                          {/* Fairness: Bench Rotation */}
+                          {/* Fairness: Bench Minutes */}
                           <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
-                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.benchSegs > 0 ? '#fef3c7' : '#f1f5f9', color: t.benchSegs > 0 ? '#b45309' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
-                              {t.benchSegs}
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.benchMins > 0 ? '#fef3c7' : '#f1f5f9', color: t.benchMins > 0 ? '#b45309' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
+                              {t.benchMins > 0 ? `${t.benchMins}m` : '—'}
                             </span>
                           </td>
 
-                          {/* Fairness: GK Rotation */}
+                          {/* Fairness: GK H1 */}
                           <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
-                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.gkGames > 0 ? '#f3e8ff' : '#f1f5f9', color: t.gkGames > 0 ? '#7c3aed' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
-                              {t.gkGames}
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.gkH1 > 0 ? '#f3e8ff' : '#f1f5f9', color: t.gkH1 > 0 ? '#7c3aed' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
+                              {t.gkH1 > 0 ? t.gkH1 : '—'}
+                            </span>
+                          </td>
+
+                          {/* Fairness: GK H2 */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
+                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.gkH2 > 0 ? '#f3e8ff' : '#f1f5f9', color: t.gkH2 > 0 ? '#7c3aed' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
+                              {t.gkH2 > 0 ? t.gkH2 : '—'}
                             </span>
                           </td>
 
@@ -290,8 +309,21 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                             ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
                           </td>
 
+                          {/* POTM */}
                           <td style={{ padding: '12px', color: '#d97706', fontWeight: 900, borderBottom: '1px solid #e2ecfc' }}>
                             {t.potm > 0 ? `⭐ ×${t.potm}` : <span style={{ color: '#cbd5e1' }}>—</span>}
+                          </td>
+
+                          {/* Captain */}
+                          <td style={{ padding: '12px', fontWeight: 900, borderBottom: '1px solid #e2ecfc' }}>
+                            {t.captainGames > 0
+                              ? <span style={{ color: '#b45309' }}>🏅 ×{t.captainGames}</span>
+                              : <span style={{ color: '#cbd5e1' }}>—</span>}
+                          </td>
+
+                          {/* Top Positions */}
+                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap', color: '#4a6b8a', fontWeight: 700, fontSize: 13 }}>
+                            {topPositions || <span style={{ color: '#cbd5e1' }}>—</span>}
                           </td>
                         </tr>
                       );
@@ -330,6 +362,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                         {game.result === 'L' && <span style={{ padding: '4px 10px', background: '#fee2e2', border: '2px solid #fca5a5', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#dc2626' }}>L</span>}
                         {game.ourScore != null && game.oppositionScore != null && <span style={{ padding: '4px 10px', background: '#f8fafc', border: '2px solid #cbd5e1', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#0f2d5a' }}>{game.ourScore} – {game.oppositionScore}</span>}
                         {game.potm && <span style={{ padding: '4px 8px', background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#b45309' }}>⭐ {game.potm}</span>}
+                        {game.captain && <span style={{ padding: '4px 8px', background: '#fff7ed', border: '2px solid #fdba74', borderRadius: 8, fontSize: 12, color: '#c2410c' }}>🏅 {game.captain}</span>}
                         {goalTotal > 0 && <span style={{ padding: '4px 8px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 12, color: '#047857' }}>⚽ {goalTotal} Goals</span>}
                         {assistTotal > 0 && <span style={{ padding: '4px 8px', background: '#eff6ff', border: '2px solid #93c5fd', borderRadius: 8, fontSize: 12, color: '#1d4ed8' }}>🅰️ {assistTotal} Assists</span>}
                       </div>
@@ -339,7 +372,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditOurScore(game.ourScore != null ? String(game.ourScore) : ''); setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
+                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditCaptain(game.captain || ''); setEditOurScore(game.ourScore != null ? String(game.ourScore) : ''); setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
                       ✏️ Edit
                     </button>
                     <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }} style={{ padding: '8px 16px', background: '#fee2e2', border: 'none', borderRadius: 8, color: '#dc2626', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
@@ -396,9 +429,18 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
             </h2>
 
             {/* POTM */}
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>⭐ PLAYER OF THE MATCH</label>
               <select value={editPotm} onChange={e => setEditPotm(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 800, color: editPotm ? '#d97706' : '#64748b', outline: 'none', cursor: 'pointer' }}>
+                <option value="">— None —</option>
+                {seasonGames[editIdx].players.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+
+            {/* Captain */}
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>🏅 CAPTAIN</label>
+              <select value={editCaptain} onChange={e => setEditCaptain(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 800, color: editCaptain ? '#c2410c' : '#64748b', outline: 'none', cursor: 'pointer' }}>
                 <option value="">— None —</option>
                 {seasonGames[editIdx].players.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -458,7 +500,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                   const ourSc = editOurScore !== '' ? Number(editOurScore) : null;
                   const oppSc = editOppScore !== '' ? Number(editOppScore) : null;
                   const result = (ourSc != null && oppSc != null) ? (ourSc > oppSc ? 'W' : ourSc < oppSc ? 'L' : 'D') : null;
-                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, ourScore: ourSc, oppositionScore: oppSc, result });
+                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, captain: editCaptain || null, ourScore: ourSc, oppositionScore: oppSc, result });
                   setEditIdx(null);
                 }} style={{ flex: 2, padding: 16, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
                 💾 Save Changes

@@ -387,7 +387,7 @@ export default function App() {
   }, []);
 
   // ── Save game to season
-  const handleSave = useCallback(({ label, goals, assists, potm, ourScore, oppositionScore }) => {
+  const handleSave = useCallback(({ label, goals, assists, potm, captain, ourScore, oppositionScore }) => {
     if (!segments) return;
     const stats = calcStats(segments, players);
     const now = new Date();
@@ -403,6 +403,7 @@ export default function App() {
       goals:          goals || {},
       assists:        assists || {},
       potm:           potm || null,
+      captain:        captain || null,
       ourScore:       ourScore ?? null,
       oppositionScore: oppositionScore ?? null,
       result,
