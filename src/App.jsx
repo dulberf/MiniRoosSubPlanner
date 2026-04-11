@@ -56,6 +56,9 @@ export default function App() {
   // ── Crash recovery
   const [resumeData,    setResumeData]    = useState(null);
   const [initialSegData, setInitialSegData] = useState({ currentSeg: 0, matchStats: {} });
+  // Tracks whether in-progress data exists in localStorage. Stays true until the
+  // coach explicitly starts a new game or confirms discard — NOT cleared on modal dismiss.
+  const [hasInProgress, setHasInProgress] = useState(() => !!loadInProgress()?.segments);
 
   useEffect(() => {
     const data = loadInProgress();
@@ -118,6 +121,7 @@ export default function App() {
     if (players.length > 12) { showToast('Maximum 12 players.', 'err'); return; }
     const segs = buildSchedule(players, lockGK);
     clearInProgress();
+    setHasInProgress(false);
     setInitialSegData({ currentSeg: 0, matchStats: {} });
     setSegments(segs);
     setIsSaved(false);
@@ -130,6 +134,19 @@ export default function App() {
     if (!segments) return;
     saveInProgress({ segments, playersText, lockGK, currentSeg, matchStats });
   }, [segments, playersText, lockGK]);
+
+  // ── Resume from setup screen banner (used when modal was dismissed but data still exists)
+  const handleResumeFromStorage = useCallback(() => {
+    const data = loadInProgress();
+    if (!data?.segments) return;
+    setPlayersText(data.playersText);
+    setLockGK(data.lockGK);
+    setSegments(data.segments);
+    setInitialSegData({ currentSeg: data.currentSeg, matchStats: data.matchStats || {} });
+    setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: data.currentSeg, isRunning: false });
+    setIsSaved(false);
+    setView('result');
+  }, []);
 
   // ── Season-smart reorder
   const handleReorder = useCallback(() => {
@@ -409,6 +426,7 @@ export default function App() {
 
     setIsSaved(true);
     clearInProgress();
+    setHasInProgress(false);
     showToast(isSaved ? 'Changes saved ✓' : 'Saved to season ✓');
   }, [segments, players, isSaved, showToast]);
 
@@ -478,8 +496,8 @@ export default function App() {
           You have an unfinished game from your last session. Do you want to resume it?
         </p>
         <div style={{ display: 'flex', gap: 12 }}>
-          <button onClick={() => { clearInProgress(); setResumeData(null); }} style={{ flex: 1, padding: 18, borderRadius: 12, background: '#f1f5f9', color: '#64748b', fontSize: 16, fontWeight: 800, border: 'none', cursor: 'pointer' }}>
-            Discard
+          <button onClick={() => setResumeData(null)} style={{ flex: 1, padding: 18, borderRadius: 12, background: '#f1f5f9', color: '#64748b', fontSize: 16, fontWeight: 800, border: 'none', cursor: 'pointer' }}>
+            Not Now
           </button>
           <button onClick={() => {
             setPlayersText(resumeData.playersText);
@@ -547,6 +565,15 @@ export default function App() {
   return (
     <>
       {resumePrompt}
+      {hasInProgress && !resumeData && (
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#1d6fcf', color: '#fff', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 50, boxShadow: '0 -4px 16px rgba(0,0,0,0.2)' }}>
+          <span style={{ fontWeight: 700, fontSize: 15 }}>⚽ Game in progress</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleResumeFromStorage} style={{ background: '#fff', color: '#1d6fcf', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>Resume</button>
+            <button onClick={() => { clearInProgress(); setHasInProgress(false); }} style={{ background: 'transparent', color: '#fff', border: '2px solid rgba(255,255,255,0.5)', borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Discard</button>
+          </div>
+        </div>
+      )}
       <InputView
         playersText={playersText}
         setPlayersText={setPlayersText}
