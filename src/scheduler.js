@@ -21,7 +21,7 @@ import { OUTFIELD } from './constants.js';
  *              (-1 means no half-time break / no bench, i.e. 9 players)
  */
 export function getSegmentConfig(squadSize) {
-  if (squadSize <= 9) return { durs: [50], htAfterSeg: -1 };
+  if (squadSize <= 9) return { durs: [25, 25], htAfterSeg: 0 };
   switch (squadSize) {
     case 10: return { durs: [5,5,5,5,5,5,5,5,5,5], htAfterSeg: 4  };
     case 11: return { durs: [5,10,10,10,10,5],      htAfterSeg: 2  };
@@ -105,7 +105,7 @@ export function buildBenchMinuteWeights(squadSize) {
  * Returns -1 for 9-player squads.
  */
 export function getSecondGKSlot(squadSize) {
-  if (squadSize <= 9) return -1;
+  if (squadSize <= 9) return 1;
 
   const config = getSegmentConfig(squadSize);
   if (!config) return -1;
@@ -209,15 +209,34 @@ export function buildSchedule(players, lockGKFullGame = false) {
   const nSegs     = durs.length;
   const benchSize = n - 9;
 
-  // ── 9-player special case: no bench, single segment ──────────────────────
+  // ── 9-player special case: no bench, two halves ──────────────────────────
   if (benchSize <= 0) {
-    const assignment = { GK: players[0] };
-    OUTFIELD.forEach((pos, i) => { assignment[pos] = players[i + 1] ?? null; });
-    return [{
-      segIdx: 0, assignment, bench: [], gkName: players[0],
-      duration: 50, label: 'H1 0–50',
-      half: 1, htBefore: false, subBefore: false, edited: false,
-    }];
+    const h1Assignment = { GK: players[0] };
+    OUTFIELD.forEach((pos, i) => { h1Assignment[pos] = players[i + 1] ?? null; });
+
+    const h2GK = lockGKFullGame ? players[0] : players[1];
+    const h2Assignment = { GK: h2GK };
+    if (lockGKFullGame) {
+      OUTFIELD.forEach((pos, i) => { h2Assignment[pos] = players[i + 1] ?? null; });
+    } else {
+      // players[1] becomes GK; players[0] steps into OUTFIELD[0] (players[1]'s H1 spot)
+      OUTFIELD.forEach((pos, i) => {
+        h2Assignment[pos] = i === 0 ? players[0] : (players[i + 1] ?? null);
+      });
+    }
+
+    return [
+      {
+        segIdx: 0, assignment: h1Assignment, bench: [], gkName: players[0],
+        duration: 25, label: 'H1 0–25',
+        half: 1, htBefore: false, subBefore: false, edited: false,
+      },
+      {
+        segIdx: 1, assignment: h2Assignment, bench: [], gkName: h2GK,
+        duration: 25, label: 'H2 25–50',
+        half: 2, htBefore: true, subBefore: false, edited: false,
+      },
+    ];
   }
 
   // ── Build the bench-slot rotation ─────────────────────────────────────────
