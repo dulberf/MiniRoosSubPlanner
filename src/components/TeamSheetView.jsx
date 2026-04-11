@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import FieldView from './FieldView.jsx';
 import { calcStats } from '../scheduler.js';
 import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER } from '../constants.js';
@@ -109,6 +109,52 @@ export default function TeamSheetView({
   useEffect(() => {
     if (onProgressUpdate) onProgressUpdate(currentSeg, matchStatsRef.current);
   }, [currentSeg, onProgressUpdate]);
+
+  // Refs so event listeners can always read the latest values without re-registering.
+  const currentSegRef = useRef(currentSeg);
+  currentSegRef.current = currentSeg;
+  const onProgressUpdateRef = useRef(onProgressUpdate);
+  onProgressUpdateRef.current = onProgressUpdate;
+  const debounceRef = useRef(null);
+
+  // Stable flush — cancels any pending debounce and writes immediately.
+  // Used by visibilitychange and beforeunload handlers.
+  const flushSave = useCallback(() => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = null;
+    if (onProgressUpdateRef.current) {
+      onProgressUpdateRef.current(currentSegRef.current, matchStatsRef.current);
+    }
+  }, []); // empty deps — stable for the lifetime of this component
+
+  // Debounced save on every matchStats change.
+  // ⚠️ Known data-loss window: a goal/assist recorded within 3 seconds of a sudden
+  // crash will not be persisted. Accepted trade-off vs disk-write thrashing.
+  useEffect(() => {
+    if (!onProgressUpdate) return;
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      onProgressUpdate(currentSegRef.current, matchStats);
+    }, 3000);
+    return () => clearTimeout(debounceRef.current);
+  }, [matchStats, onProgressUpdate]);
+
+  // Flush on visibility change (primary iPad/iOS save path) and beforeunload (desktop fallback).
+  // ⚠️ iOS/iPad: beforeunload is unreliable — the OS can kill the process before the
+  // disk write completes. visibilitychange is the critical path for iPad and must
+  // never be the sole flush mechanism.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushSave();
+    };
+    const handleBeforeUnload = () => flushSave();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [flushSave]); // flushSave is stable — registers once, never re-runs
 
   const activeSegIdx = gameClock.currentSegIdx !== null ? gameClock.currentSegIdx : currentSeg;
   const activeSeg = segments[activeSegIdx];

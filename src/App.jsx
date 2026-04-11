@@ -88,6 +88,18 @@ export default function App() {
   // Persist season to localStorage whenever it changes
   useEffect(() => { saveSeason(seasonGames); }, [seasonGames]);
 
+  // Warn before leaving if a game is in progress and unsaved.
+  // Triggers the browser's native "Leave page?" dialog on desktop/dev.
+  useEffect(() => {
+    if (!segments || isSaved) return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = ''; // required for Chrome to show the dialog
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [segments, isSaved]);
+
   // Derived player list from textarea
   const players = useMemo(
     () => playersText.split('\n').map(l => l.trim()).filter(Boolean),

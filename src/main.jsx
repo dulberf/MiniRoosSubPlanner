@@ -7,12 +7,20 @@ class ErrorBoundary extends Component {
   static getDerivedStateFromError(error) { return { error }; }
   render() {
     if (this.state.error) {
+      const hasRecovery = !!localStorage.getItem('teamsheet_in_progress');
       return (
         <div style={{ padding: 32, fontFamily: 'monospace', background: '#fee2e2', minHeight: '100vh' }}>
           <h2 style={{ color: '#dc2626' }}>Render Error</h2>
           <pre style={{ whiteSpace: 'pre-wrap', color: '#7f1d1d' }}>{this.state.error?.message}</pre>
           <pre style={{ whiteSpace: 'pre-wrap', color: '#7f1d1d', fontSize: 11 }}>{this.state.error?.stack}</pre>
-          <button onClick={() => this.setState({ error: null })} style={{ marginTop: 16, padding: '12px 24px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: 'pointer' }}>Retry</button>
+          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+            {hasRecovery && (
+              <button onClick={() => this.setState({ error: null })} style={{ padding: '12px 24px', background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: 'pointer' }}>
+                Recover Last Game
+              </button>
+            )}
+            <button onClick={() => this.setState({ error: null })} style={{ padding: '12px 24px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: 'pointer' }}>Retry</button>
+          </div>
         </div>
       );
     }
