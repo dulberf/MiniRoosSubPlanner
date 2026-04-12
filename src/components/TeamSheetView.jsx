@@ -57,6 +57,7 @@ export default function TeamSheetView({
   const [captain, setCaptain] = useState('');
   const [ourScore, setOurScore] = useState('');
   const [oppositionScore, setOppositionScore] = useState('');
+  const [matchNotes, setMatchNotes] = useState('');
 
   // Suggest the captain from the last winning game (may not be in today's squad)
   const suggestedCaptain = useMemo(() => {
@@ -361,6 +362,13 @@ export default function TeamSheetView({
               })}
             </div>
 
+            <textarea
+              value={matchNotes}
+              onChange={e => setMatchNotes(e.target.value)}
+              placeholder="Tactics, HT talk, training focus..."
+              style={{ width: '100%', minHeight: 120, padding: 14, borderRadius: 12, border: '3px solid #c7daf7', fontSize: 15, fontWeight: 600, color: '#0f2d5a', background: '#fff', resize: 'vertical', boxSizing: 'border-box', outline: 'none', fontFamily: 'system-ui, sans-serif', lineHeight: 1.5 }}
+            />
+
             {currentSeg < segments.length - 1 && !editMode && !isEffectivelyLocked && (
               <button onClick={() => setScriptModal({ title: '📋 Next Sub Script', subs: upcomingSubs })} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fffbeb', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
                 📋 READ NEXT SUB SCRIPT
@@ -537,7 +545,7 @@ export default function TeamSheetView({
                   if (stats.goals && stats.goals > 0) formattedGoals[p] = stats.goals;
                   if (stats.assists && stats.assists > 0) formattedAssists[p] = stats.assists;
                 });
-                onSave({ label: matchLabel, potm, captain, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null });
+                onSave({ label: matchLabel, potm, captain, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null, notes: matchNotes });
                 setSaveOpen(false);
                 onGoSeason();
               }} style={{ flex: 2, padding: 20, borderRadius: 12, background: '#059669', color: '#fff', fontSize: 16, fontWeight: 900, border: 'none', cursor: 'pointer' }}>

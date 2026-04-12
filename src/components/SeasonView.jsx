@@ -16,6 +16,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   const [editCaptain, setEditCaptain]         = useState('');
   const [editOurScore, setEditOurScore]       = useState('');
   const [editOppScore, setEditOppScore]       = useState('');
+  const [editNotes, setEditNotes]             = useState('');
   const [importMsg, setImportMsg]       = useState(null);
   const importRef                       = useRef(null);
 
@@ -365,6 +366,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                         {game.captain && <span style={{ padding: '4px 8px', background: '#fff7ed', border: '2px solid #fdba74', borderRadius: 8, fontSize: 12, color: '#c2410c' }}>🏅 {game.captain}</span>}
                         {goalTotal > 0 && <span style={{ padding: '4px 8px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 12, color: '#047857' }}>⚽ {goalTotal} Goals</span>}
                         {assistTotal > 0 && <span style={{ padding: '4px 8px', background: '#eff6ff', border: '2px solid #93c5fd', borderRadius: 8, fontSize: 12, color: '#1d4ed8' }}>🅰️ {assistTotal} Assists</span>}
+                        {game.notes && <span style={{ padding: '4px 8px', background: '#f5f3ff', border: '2px solid #c4b5fd', borderRadius: 8, fontSize: 12, color: '#7c3aed' }}>📝 Notes</span>}
                       </div>
                       <div style={{ fontSize: 14, color: '#64748b', marginTop: 4, fontWeight: 600 }}>
                         {game.date} · {game.players.length} Players {minMin === maxMin ? `· Perfectly Equal Time (${minMin}m)` : `· Spread: ${minMin}m – ${maxMin}m`}
@@ -372,7 +374,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditCaptain(game.captain || ''); setEditOurScore(game.ourScore != null ? String(game.ourScore) : ''); setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
+                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditCaptain(game.captain || ''); setEditOurScore(game.ourScore != null ? String(game.ourScore) : ''); setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : ''); setEditNotes(game.notes || ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
                       ✏️ Edit
                     </button>
                     <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }} style={{ padding: '8px 16px', background: '#fee2e2', border: 'none', borderRadius: 8, color: '#dc2626', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
@@ -492,6 +494,16 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
               </div>
             </div>
 
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>📝 MATCH NOTES</label>
+              <textarea
+                value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+                placeholder="Tactics, HT talk, training focus..."
+                style={{ width: '100%', minHeight: 100, padding: 14, borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 15, fontWeight: 600, color: '#0f2d5a', background: '#f8fafc', resize: 'vertical', boxSizing: 'border-box', outline: 'none', fontFamily: 'system-ui, sans-serif', lineHeight: 1.5 }}
+              />
+            </div>
+
             <div style={{ display: 'flex', gap: 12 }}>
               <button onClick={() => setEditIdx(null)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 16, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
               <button onClick={() => {
@@ -500,7 +512,7 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                   const ourSc = editOurScore !== '' ? Number(editOurScore) : null;
                   const oppSc = editOppScore !== '' ? Number(editOppScore) : null;
                   const result = (ourSc != null && oppSc != null) ? (ourSc > oppSc ? 'W' : ourSc < oppSc ? 'L' : 'D') : null;
-                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, captain: editCaptain || null, ourScore: ourSc, oppositionScore: oppSc, result });
+                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, captain: editCaptain || null, ourScore: ourSc, oppositionScore: oppSc, result, notes: editNotes });
                   setEditIdx(null);
                 }} style={{ flex: 2, padding: 16, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
                 💾 Save Changes
