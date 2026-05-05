@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import Toggle from './Toggle.jsx';
 import { getSegmentConfig } from '../scheduler.js';
 import { POS_LABEL, DEFAULT_PLAYERS } from '../constants.js';
 
 export default function InputView({
   playersText, setPlayersText,
-  lockGK, setLockGK,
+  gkH1, setGkH1,
+  gkH2, setGkH2,
   onGenerate, onReorder, onGoSeason,
   seasonGameCount,
   onImport, importMsg,
@@ -43,6 +43,8 @@ export default function InputView({
     });
     return times;
   }, [config, benchSz]);
+
+  const lockGKEffective = !!gkH1 && gkH1 === gkH2;
 
   const togglePlayer = (name) => {
     const isPlaying = activePlayers.includes(name);
@@ -141,15 +143,41 @@ export default function InputView({
             />
           )}
 
-          {/* GK toggle */}
-          <div style={{ background: '#f8fafc', border: '3px solid #e2ecfc', borderRadius: 16, padding: '4px 8px', marginBottom: 16 }}>
-            <Toggle
-              value={lockGK}
-              onChange={() => setLockGK(v => !v)}
-              label="🧤 GK plays full game"
-              sublabel={lockGK ? 'GK stays in goal all 50 min' : 'GK rotates to bench at half time'}
-            />
-          </div>
+          {/* GK picker */}
+          {isValid && (
+            <div style={{ background: '#f8fafc', border: '3px solid #e2ecfc', borderRadius: 16, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginBottom: 12 }}>🧤 GOALKEEPERS</div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#64748b', marginBottom: 6, letterSpacing: 0.5 }}>1ST HALF</label>
+                <select
+                  value={gkH1 || ''}
+                  onChange={e => setGkH1(e.target.value || null)}
+                  style={{ width: '100%', padding: '12px', borderRadius: 10, border: '2px solid #cbd5e1', fontSize: 16, fontWeight: 700, background: '#fff', color: '#0f2d5a', outline: 'none', cursor: 'pointer', boxSizing: 'border-box' }}>
+                  <option value="">— Pick GK —</option>
+                  {activePlayers.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#64748b', marginBottom: 6, letterSpacing: 0.5 }}>2ND HALF</label>
+                <select
+                  value={gkH2 || ''}
+                  onChange={e => setGkH2(e.target.value || null)}
+                  style={{ width: '100%', padding: '12px', borderRadius: 10, border: '2px solid #cbd5e1', fontSize: 16, fontWeight: 700, background: '#fff', color: '#0f2d5a', outline: 'none', cursor: 'pointer', boxSizing: 'border-box' }}>
+                  <option value="">— Pick GK —</option>
+                  {gkH1 && <option value={gkH1}>{gkH1} (same as H1 — full game)</option>}
+                  {activePlayers.filter(p => p !== gkH1).map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: '#4a6b8a', lineHeight: 1.5 }}>
+                {lockGKEffective
+                  ? '💡 Same player both halves — GK plays the full 50 minutes.'
+                  : seasonGameCount > 0 ? '💡 Suggested from history. Override if needed.' : '💡 Pre-filled with the first two players.'}
+              </div>
+            </div>
+          )}
 
           {/* Game plan preview */}
           {isValid && (
@@ -157,7 +185,7 @@ export default function InputView({
               <div style={{ fontSize: 12, fontWeight: 900, color: '#b45309', letterSpacing: 1, marginBottom: 12 }}>GAME PLAN PREVIEW</div>
               {[
                 ['🔄', 'Subs', benchSz === 0 ? 'No subs needed' : subTimes.join('  ·  ')],
-                ['⚖️', 'Time', benchSz === 0 ? 'All play 50 min' : lockGK ? `GK: 50m · Others: ~${Math.round(400 / (count - 1))}m` : `~${Math.round(450 / count)}m each`],
+                ['⚖️', 'Time', benchSz === 0 ? 'All play 50 min' : lockGKEffective ? `GK: 50m · Others: ~${Math.round(400 / (count - 1))}m` : `~${Math.round(450 / count)}m each`],
               ].map(([icon, label, value]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '2px solid #fde68a', gap: 8 }}>
                   <span style={{ color: '#92400e', fontWeight: 800 }}>{icon} {label}</span>

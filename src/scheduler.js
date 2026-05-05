@@ -119,11 +119,39 @@ export function getSecondGKSlot(squadSize) {
 }
 
 /**
+ * Reorders the player list so that gkH1 is at index 0 and gkH2 is at the
+ * second-GK slot expected by buildBenchSlots. Other players preserve their
+ * relative order. Returns a new array (input is not mutated).
+ */
+function reorderForExplicitGKs(players, gkH1, gkH2) {
+  const n = players.length;
+  const secondGKSlot = getSecondGKSlot(n);
+  const lockGK = !gkH2 || gkH1 === gkH2;
+
+  const others = players.filter(p => p !== gkH1 && (lockGK || p !== gkH2));
+  const result = new Array(n).fill(null);
+  result[0] = gkH1;
+  if (!lockGK && secondGKSlot > 0 && secondGKSlot < n) {
+    result[secondGKSlot] = gkH2;
+  }
+  let oi = 0;
+  for (let i = 0; i < n; i++) {
+    if (result[i] === null) result[i] = others[oi++];
+  }
+  return result;
+}
+
+/**
  * Re-orders the players array to fairly distribute GK duty and bench time
  * based on the season history.
  *
+ * GK selection is strict round-robin: ascending by total GK stints, then
+ * ascending by the index of the most recent game in which the player was GK
+ * (so a player who hasn't been GK in a while wins ties over one who just was).
+ * Players who have never been GK rank first regardless.
+ *
  * players  – string[]   current player list
- * history  – game[]     saved games from this season
+ * history  – game[]     saved games from this season (chronological order)
  * lockGK   – boolean    if true, player[0] will be GK all game (skip 2nd-GK slot)
  */
 export function orderPlayersForGame(players, history, lockGK = false) {
@@ -132,37 +160,44 @@ export function orderPlayersForGame(players, history, lockGK = false) {
   const n = players.length;
   if (!getSegmentConfig(n)) return players;
 
-  // Tally GK stints and accumulated bench-minutes per player from history
-  const gkStints  = Object.fromEntries(players.map(p => [p, 0]));
-  const benchMins = Object.fromEntries(players.map(p => [p, 0]));
-  const weights   = buildBenchMinuteWeights(n);
+  // Tally GK stints, last-GK-game index, and accumulated bench-minutes per player
+  const gkStints   = Object.fromEntries(players.map(p => [p, 0]));
+  const lastGKGame = Object.fromEntries(players.map(p => [p, -1]));
+  const benchMins  = Object.fromEntries(players.map(p => [p, 0]));
+  const weights    = buildBenchMinuteWeights(n);
 
-  history.forEach(game => {
+  history.forEach((game, gameIdx) => {
     const segs = game.segments;
     if (!segs) return;
 
     const h1GK = segs.find(s => s.half === 1)?.assignment?.GK;
     const h2GK = segs.find(s => s.half === 2)?.assignment?.GK;
-    if (h1GK && gkStints[h1GK] !== undefined) gkStints[h1GK]++;
-    if (h2GK && h2GK !== h1GK && gkStints[h2GK] !== undefined) gkStints[h2GK]++;
+    if (h1GK && gkStints[h1GK] !== undefined) {
+      gkStints[h1GK]++;
+      lastGKGame[h1GK] = gameIdx;
+    }
+    if (h2GK && h2GK !== h1GK && gkStints[h2GK] !== undefined) {
+      gkStints[h2GK]++;
+      lastGKGame[h2GK] = gameIdx;
+    }
 
     game.players?.forEach((p, idx) => {
       if (benchMins[p] !== undefined) benchMins[p] += weights[idx] || 0;
     });
   });
 
-  // Sort ascending by GK stints (ties broken by original order = stable)
+  // Sort: stints asc → lastGKGame asc (oldest first; never-GK = -1 wins) → original idx
   const sorted = players
-    .map((p, i) => ({ p, i, stints: gkStints[p] || 0 }))
-    .sort((a, b) => a.stints - b.stints || a.i - b.i)
+    .map((p, i) => ({ p, i, stints: gkStints[p] || 0, last: lastGKGame[p] ?? -1 }))
+    .sort((a, b) => a.stints - b.stints || a.last - b.last || a.i - b.i)
     .map(x => x.p);
 
   const secondGKSlot = getSecondGKSlot(n);
   const result = new Array(n).fill(null);
   const pool   = [...sorted];
 
-  result[0] = pool.shift(); // fewest GK stints → first GK
-  if (secondGKSlot > 0 && !lockGK) result[secondGKSlot] = pool.shift(); // 2nd-least → rotation GK
+  result[0] = pool.shift(); // best GK candidate by stints + recency
+  if (secondGKSlot > 0 && !lockGK) result[secondGKSlot] = pool.shift(); // next-best → H2 GK
 
   // Fill remaining slots: sort empty slots by bench-weight asc, fill with
   // players who have had the most bench time (so they get more field time now)
@@ -183,8 +218,11 @@ export function orderPlayersForGame(players, history, lockGK = false) {
 /**
  * Builds the complete substitution schedule for a game.
  *
- * players         – string[]  player names; players[0] is the first GK
- * lockGKFullGame  – boolean   if true, players[0] stays in goal the whole game
+ * players  – string[]  player names
+ * options  – { gkH1, gkH2, lockGK } (or legacy boolean for lockGKFullGame)
+ *           gkH1: name of H1 goalkeeper (defaults to players[0])
+ *           gkH2: name of H2 goalkeeper (defaults to suggested rotation pick)
+ *                 If equal to gkH1 or omitted with lockGK, GK plays full game.
  *
  * Returns an array of segment objects:
  * {
@@ -200,7 +238,9 @@ export function orderPlayersForGame(players, history, lockGK = false) {
  *   edited:    boolean          true if the user has manually swapped players
  * }
  */
-export function buildSchedule(players, lockGKFullGame = false) {
+export function buildSchedule(players, options = false) {
+  // Back-compat: a boolean second arg means lockGKFullGame from the old API
+  const opts = typeof options === 'boolean' ? { lockGK: options } : (options || {});
   const n      = players.length;
   const config = getSegmentConfig(n);
   if (!config) return null;
@@ -208,6 +248,25 @@ export function buildSchedule(players, lockGKFullGame = false) {
   const { durs, htAfterSeg } = config;
   const nSegs     = durs.length;
   const benchSize = n - 9;
+
+  // Resolve effective GKs. Fall back to legacy "players[0] = H1 GK" if not provided.
+  const gkH1Name = (opts.gkH1 && players.includes(opts.gkH1)) ? opts.gkH1 : players[0];
+  const lockGKFullGame = !!opts.lockGK || (opts.gkH2 && opts.gkH2 === gkH1Name);
+  let gkH2Name;
+  if (lockGKFullGame) {
+    gkH2Name = gkH1Name;
+  } else if (opts.gkH2 && players.includes(opts.gkH2) && opts.gkH2 !== gkH1Name) {
+    gkH2Name = opts.gkH2;
+  } else {
+    // Default: index 1 for 9-player; secondGKSlot for >9
+    const sgs = getSecondGKSlot(n);
+    gkH2Name = (sgs > 0 && players[sgs]) ? players[sgs] : (players[1] ?? gkH1Name);
+  }
+
+  // Reorder so the existing slot-based math drops gkH1 at index 0 and (when not
+  // locked) gkH2 at the rotation slot the algorithm expects.
+  const ordered = reorderForExplicitGKs(players, gkH1Name, gkH2Name);
+  players = ordered;
 
   // ── 9-player special case: no bench, two halves ──────────────────────────
   if (benchSize <= 0) {
@@ -492,6 +551,53 @@ export function splitSegment(segments, segmentIndex, elapsedMinutes) {
     seg.half  = start >= 25 ? 2 : 1;
     seg.label = `H${seg.half} ${start}–${elapsed}`;
   });
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Mid-game GK change (emergency / refusal / injury)
+// ---------------------------------------------------------------------------
+
+/**
+ * Switch goalkeeper for the rest of the current half, starting at fromSegIdx.
+ * The new GK trades places with the previous GK across every remaining segment
+ * in the half: wherever the new GK was scheduled (field or bench), the old GK
+ * takes their slot. This guarantees the new GK is never benched in their half.
+ *
+ * Stops at the half-time boundary — H2 GK is not modified by an H1 change and
+ * vice versa.
+ */
+export function changeGKFromSegment(segments, fromSegIdx, newGKName) {
+  if (!segments || fromSegIdx < 0 || fromSegIdx >= segments.length) return segments;
+  const targetHalf = segments[fromSegIdx].half;
+  const result = segments.map(s => structuredClone(s));
+
+  for (let i = fromSegIdx; i < result.length; i++) {
+    const seg = result[i];
+    if (seg.half !== targetHalf) break;
+
+    const oldGK = seg.assignment.GK;
+    if (oldGK === newGKName) continue;
+
+    const fieldEntry = Object.entries(seg.assignment).find(([, n]) => n === newGKName);
+    const benchIdx = seg.bench.indexOf(newGKName);
+
+    if (fieldEntry) {
+      const [oldPos] = fieldEntry;
+      seg.assignment.GK = newGKName;
+      seg.assignment[oldPos] = oldGK;
+    } else if (benchIdx !== -1) {
+      seg.assignment.GK = newGKName;
+      seg.bench[benchIdx] = oldGK;
+    } else {
+      // newGKName isn't on field or bench in this segment — skip rather than corrupt
+      continue;
+    }
+
+    seg.gkName = newGKName;
+    seg.edited = true;
+  }
 
   return result;
 }

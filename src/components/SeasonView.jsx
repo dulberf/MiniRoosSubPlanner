@@ -386,6 +386,12 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
                 {/* Expanded Player Details */}
                 {isExpanded && (
                   <div style={{ padding: '16px 20px', borderTop: '3px solid #e2ecfc', background: '#fff' }}>
+                    {game.notes && (
+                      <div style={{ marginBottom: 16, padding: '14px 16px', borderRadius: 12, background: '#f5f3ff', border: '2px solid #c4b5fd' }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: '#7c3aed', letterSpacing: 1, marginBottom: 6 }}>📝 MATCH NOTES</div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#3b1d8a', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{game.notes}</div>
+                      </div>
+                    )}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
                       {game.players.map(p => {
                         const mins = game.stats?.minutesMap?.[p] ?? 0;

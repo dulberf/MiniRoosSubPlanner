@@ -34,9 +34,10 @@ function getSubChanges(prev, curr) {
 }
 
 export default function TeamSheetView({
-  players, segments, lockGK, seasonGames, onSwap, onSave, onReorder, onGoSeason, onGoSetup, isSaved, toast,
+  players, segments, seasonGames, onSwap, onSave, onReorder, onGoSeason, onGoSetup, isSaved, toast,
   gameClock = { isRunning: false, accumulatedMs: 0, currentSegIdx: null, segmentStartTime: null },
   onStartPeriod, onPausePeriod, onSplitSegment, onAdvanceSegment, onNudgeClock, onResetClock, onResetGame,
+  onChangeGK,
   initialCurrentSeg = 0, initialMatchStats = {}, onProgressUpdate,
 }) {
   const [tab, setTab] = useState('field');
@@ -48,7 +49,10 @@ export default function TeamSheetView({
   const [matchStats, setMatchStats] = useState(initialMatchStats); 
   const [orientation, setOrientation] = useState('vertical'); 
   
-  const [scriptModal, setScriptModal] = useState(null); 
+  const [scriptModal, setScriptModal] = useState(null);
+  const [honoursOpen, setHonoursOpen] = useState(false);
+  const [confirmGK, setConfirmGK] = useState(null); // { name } when confirming a mid-game GK swap
+  const [gkPickerOpen, setGkPickerOpen] = useState(false);
 
   // FIX: Restore Save Modal State
   const [saveOpen, setSaveOpen] = useState(false);
@@ -230,9 +234,7 @@ export default function TeamSheetView({
       setActivePlayer(activePlayer === name ? null : name);
       return;
     }
-    if (isEffectivelyLocked) return; 
-    const locked = pos === 'GK' && lockGK;
-    if (locked) return;
+    if (isEffectivelyLocked) return;
     if (!swapFrom) { setSwapFrom({ type: 'pos', pos, name }); return; }
     if (swapFrom.type === 'pos' && swapFrom.pos === pos) { setSwapFrom(null); return; }
     onSwap(currentSeg, { from: swapFrom, to: { type: 'pos', pos, name } });
@@ -323,9 +325,14 @@ export default function TeamSheetView({
           )}
         </div>
 
-        <button onClick={() => setOrientation(isKidsView ? 'vertical' : 'horizontal-right')} style={{ padding: '10px 20px', fontSize: 16, fontWeight: 800, background: isKidsView ? '#059669' : '#e2ecfc', border: `3px solid ${isKidsView ? '#047857' : '#1d6fcf'}`, borderRadius: 8, color: isKidsView ? '#fff' : '#1d6fcf', cursor: 'pointer' }}>
-          {isKidsView ? '📱 Coach View' : '📺 Show Kids'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setHonoursOpen(true)} style={{ padding: '10px 16px', fontSize: 14, fontWeight: 800, background: '#fffbeb', border: '3px solid #fcd34d', borderRadius: 8, color: '#b45309', cursor: 'pointer' }}>
+            🏆 Honours
+          </button>
+          <button onClick={() => setOrientation(isKidsView ? 'vertical' : 'horizontal-right')} style={{ padding: '10px 20px', fontSize: 16, fontWeight: 800, background: isKidsView ? '#059669' : '#e2ecfc', border: `3px solid ${isKidsView ? '#047857' : '#1d6fcf'}`, borderRadius: 8, color: isKidsView ? '#fff' : '#1d6fcf', cursor: 'pointer' }}>
+            {isKidsView ? '📱 Coach View' : '📺 Show Kids'}
+          </button>
+        </div>
       </header>
 
       {/* ── 2. Chunky Timeline ── */}
@@ -372,6 +379,12 @@ export default function TeamSheetView({
             {currentSeg < segments.length - 1 && !editMode && !isEffectivelyLocked && (
               <button onClick={() => setScriptModal({ title: '📋 Next Sub Script', subs: upcomingSubs })} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fffbeb', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
                 📋 READ NEXT SUB SCRIPT
+              </button>
+            )}
+
+            {!editMode && !isEffectivelyLocked && (
+              <button onClick={() => setGkPickerOpen(true)} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fff7ed', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
+                🧤 ALLOCATE GK
               </button>
             )}
 
@@ -443,6 +456,100 @@ export default function TeamSheetView({
                   <button onClick={() => updateStat(activePlayer, 'assists', 1)} style={{ width: 60, height: 60, fontSize: 32, fontWeight: 900, borderRadius: 12, background: '#3b82f6', border: 'none', color: '#fff', cursor: 'pointer' }}>+</button>
                 </div>
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Allocate GK: pick a player to take over in goal ── */}
+      {gkPickerOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 240, padding: 20 }}>
+          <div style={{ background: '#fff', padding: 28, borderRadius: 24, width: '100%', maxWidth: 420, maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+            <h2 style={{ fontSize: 22, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 6 }}>🧤 Allocate Goalkeeper</h2>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#4a6b8a', marginBottom: 18, lineHeight: 1.4 }}>
+              Pick a player to go in goal for the rest of {seg.half === 1 ? 'the first half' : 'the second half'}. Currently in goal: <strong style={{ color: '#0f2d5a' }}>{seg.assignment.GK}</strong>.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {players.filter(p => p !== seg.assignment.GK).map(p => {
+                const onBench = seg.bench.includes(p);
+                return (
+                  <button key={p} onClick={() => { setGkPickerOpen(false); setConfirmGK({ name: p }); }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderRadius: 10, background: '#f8fafc', border: '2px solid #e2ecfc', fontSize: 16, fontWeight: 800, color: '#0f2d5a', cursor: 'pointer', textAlign: 'left' }}>
+                    <span>{p}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: onBench ? '#b45309' : '#059669' }}>{onBench ? '🪑 ON BENCH' : '⚽ ON FIELD'}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setGkPickerOpen(false)} style={{ width: '100%', marginTop: 16, padding: 14, fontSize: 15, fontWeight: 800, background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 12, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm: change GK mid-game ── */}
+      {confirmGK && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 250, padding: 20 }}>
+          <div style={{ background: '#fff', padding: 32, borderRadius: 24, width: '100%', maxWidth: 440, boxShadow: '0 24px 60px rgba(0,0,0,0.3)', textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🧤</div>
+            <h2 style={{ fontSize: 22, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 12 }}>Change Goalkeeper?</h2>
+            <p style={{ fontSize: 15, color: '#4a6b8a', fontWeight: 600, lineHeight: 1.5, margin: '0 0 24px' }}>
+              <strong style={{ color: '#0f2d5a' }}>{confirmGK.name}</strong> will go in goal for the rest of {seg.half === 1 ? 'the first half' : 'the second half'}. <strong style={{ color: '#0f2d5a' }}>{seg.assignment.GK}</strong> will swap into their place. Subs already played are not affected.
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setConfirmGK(null)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => {
+                onChangeGK?.(currentSeg, confirmGK.name);
+                setConfirmGK(null);
+                setActivePlayer(null);
+              }} style={{ flex: 2, padding: 16, background: '#f59e0b', border: 'none', borderRadius: 12, color: '#fff', fontSize: 15, fontWeight: 900, cursor: 'pointer' }}>
+                🧤 Make GK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Honours sheet ── */}
+      {honoursOpen && (() => {
+        const counts = {};
+        players.forEach(p => { counts[p] = { potm: 0, captain: 0 }; });
+        (seasonGames || []).forEach(g => {
+          if (g.potm && counts[g.potm]) counts[g.potm].potm++;
+          if (g.captain && counts[g.captain]) counts[g.captain].captain++;
+        });
+        const sorted = [...players].sort((a, b) => {
+          const at = counts[a].potm + counts[a].captain;
+          const bt = counts[b].potm + counts[b].captain;
+          if (at !== bt) return bt - at;
+          return a.localeCompare(b);
+        });
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 250, padding: 20 }}>
+            <div style={{ background: '#fff', padding: 28, borderRadius: 24, width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+              <h2 style={{ fontSize: 22, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 6 }}>🏆 Season Honours</h2>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 16, padding: '8px 12px', background: '#f8fafc', borderRadius: 8, border: '2px solid #e2ecfc' }}>
+                <span style={{ color: '#d97706' }}>⭐</span> Player of the Week  ·  <span style={{ color: '#c2410c' }}>🏅</span> Captain
+              </div>
+              {seasonGames.length === 0 ? (
+                <div style={{ padding: 32, textAlign: 'center', color: '#64748b', fontWeight: 600 }}>No games saved yet — honours will appear here once you've recorded a few matches.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {sorted.map(p => {
+                    const { potm, captain } = counts[p];
+                    const total = potm + captain;
+                    return (
+                      <div key={p} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderRadius: 10, background: total > 0 ? '#fffbeb' : '#f8fafc', border: `2px solid ${total > 0 ? '#fcd34d' : '#e2ecfc'}` }}>
+                        <span style={{ fontSize: 15, fontWeight: 800, color: '#0f2d5a' }}>{p}</span>
+                        <div style={{ display: 'flex', gap: 12, fontSize: 14, fontWeight: 800 }}>
+                          {potm > 0 && <span style={{ color: '#b45309' }}>⭐ ×{potm}</span>}
+                          {captain > 0 && <span style={{ color: '#c2410c' }}>🏅 ×{captain}</span>}
+                          {total === 0 && <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <button onClick={() => setHonoursOpen(false)} style={{ width: '100%', marginTop: 20, padding: 16, fontSize: 16, fontWeight: 900, background: '#1d6fcf', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer' }}>Close</button>
             </div>
           </div>
         );

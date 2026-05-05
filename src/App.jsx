@@ -8,7 +8,7 @@ import InputView      from './components/InputView.jsx';
 import TeamSheetView  from './components/TeamSheetView.jsx';
 import SeasonView     from './components/SeasonView.jsx';
 
-import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment } from './scheduler.js';
+import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment, changeGKFromSegment, getSecondGKSlot } from './scheduler.js';
 import { STORAGE_KEY, IN_PROGRESS_KEY, DEFAULT_PLAYERS } from './constants.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -44,7 +44,8 @@ export default function App() {
 
   // ── Setup state
   const [playersText, setPlayersText] = useState(DEFAULT_PLAYERS);
-  const [lockGK,      setLockGK]      = useState(false);
+  const [gkH1,        setGkH1]        = useState(null);
+  const [gkH2,        setGkH2]        = useState(null);
 
   // ── Season data
   const [seasonGames, setSeasonGames] = useState(loadSeason);
@@ -109,6 +110,33 @@ export default function App() {
     [playersText]
   );
 
+  // Auto-suggest GKs from the fairness oracle. Fires when squad changes or a
+  // pick falls out of the squad. Preserves manual picks, then ensures H1 ≠ H2
+  // (when the oracle's H2 slot would collide with a preserved H1, fall back to
+  // the oracle's H1 slot — guaranteed to be a different player).
+  useEffect(() => {
+    if (players.length < 6 || players.length > 12) return;
+    const reordered = orderPlayersForGame(players, seasonGames, false);
+    const slot = getSecondGKSlot(reordered.length);
+    const oracleH1 = reordered[0] ?? null;
+    const oracleH2 = (slot > 0 && reordered[slot]) ? reordered[slot] : null;
+
+    const finalH1 = (gkH1 && players.includes(gkH1)) ? gkH1 : oracleH1;
+    let finalH2;
+    if (gkH2 && players.includes(gkH2) && gkH2 !== finalH1) {
+      finalH2 = gkH2;
+    } else if (oracleH2 && oracleH2 !== finalH1) {
+      finalH2 = oracleH2;
+    } else if (oracleH1 && oracleH1 !== finalH1) {
+      finalH2 = oracleH1;
+    } else {
+      finalH2 = finalH1; // tiny squad fallback
+    }
+
+    if (finalH1 !== gkH1) setGkH1(finalH1);
+    if (finalH2 !== gkH2) setGkH2(finalH2);
+  }, [players, seasonGames, gkH1, gkH2]);
+
   const showToast = useCallback((msg, type = 'ok') => {
     clearTimeout(toastTimer.current);
     setToast({ msg, type });
@@ -119,7 +147,7 @@ export default function App() {
   const handleGenerate = useCallback(() => {
     if (players.length < 6) { showToast('Need at least 6 players!', 'err'); return; }
     if (players.length > 12) { showToast('Maximum 12 players.', 'err'); return; }
-    const segs = buildSchedule(players, lockGK);
+    const segs = buildSchedule(players, { gkH1, gkH2 });
     clearInProgress();
     setHasInProgress(false);
     setInitialSegData({ currentSeg: 0, matchStats: {} });
@@ -127,20 +155,21 @@ export default function App() {
     setIsSaved(false);
     setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: null, isRunning: false });
     setView('result');
-  }, [players, lockGK, showToast]);
+  }, [players, gkH1, gkH2, showToast]);
 
   // ── In-progress save (called by TeamSheetView on segment change)
   const handleProgressUpdate = useCallback((currentSeg, matchStats) => {
     if (!segments) return;
-    saveInProgress({ segments, playersText, lockGK, currentSeg, matchStats });
-  }, [segments, playersText, lockGK]);
+    saveInProgress({ segments, playersText, gkH1, gkH2, currentSeg, matchStats });
+  }, [segments, playersText, gkH1, gkH2]);
 
   // ── Resume from setup screen banner (used when modal was dismissed but data still exists)
   const handleResumeFromStorage = useCallback(() => {
     const data = loadInProgress();
     if (!data?.segments) return;
     setPlayersText(data.playersText);
-    setLockGK(data.lockGK);
+    if (data.gkH1) setGkH1(data.gkH1);
+    if (data.gkH2) setGkH2(data.gkH2);
     setSegments(data.segments);
     setInitialSegData({ currentSeg: data.currentSeg, matchStats: data.matchStats || {} });
     setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: data.currentSeg, isRunning: false });
@@ -148,17 +177,43 @@ export default function App() {
     setView('result');
   }, []);
 
-  // ── Season-smart reorder
+  // ── Season-smart reorder. Respects manual GK picks if they're still in the squad;
+  // otherwise falls back to the fairness oracle's choice. Guards against H2
+  // collapsing to the same player as H1 when the oracle's H2 slot happens to be
+  // whoever's currently preserved as H1.
   const handleReorder = useCallback(() => {
     if (seasonGames.length === 0) return;
-    const reordered = orderPlayersForGame(players, seasonGames, lockGK);
+    const reordered = orderPlayersForGame(players, seasonGames, false);
     setPlayersText(reordered.join('\n'));
     if (reordered.length >= 6 && reordered.length <= 12) {
-      setSegments(buildSchedule(reordered, lockGK));
+      const slot = getSecondGKSlot(reordered.length);
+      const oracleH1 = reordered[0] ?? null;
+      const oracleH2 = (slot > 0 && reordered[slot]) ? reordered[slot] : null;
+      const finalH1 = (gkH1 && reordered.includes(gkH1)) ? gkH1 : oracleH1;
+      let finalH2;
+      if (gkH2 && reordered.includes(gkH2) && gkH2 !== finalH1) {
+        finalH2 = gkH2;
+      } else if (oracleH2 && oracleH2 !== finalH1) {
+        finalH2 = oracleH2;
+      } else if (oracleH1 && oracleH1 !== finalH1) {
+        finalH2 = oracleH1;
+      } else {
+        finalH2 = finalH1;
+      }
+      setGkH1(finalH1);
+      setGkH2(finalH2);
+      setSegments(buildSchedule(reordered, { gkH1: finalH1, gkH2: finalH2 }));
       setIsSaved(false);
       if (view === 'setup') setView('result');
     }
-  }, [players, seasonGames, lockGK, view]);
+  }, [players, seasonGames, view, gkH1, gkH2]);
+
+  // ── Mid-game GK change (from TeamSheetView player modal)
+  const handleChangeGK = useCallback((fromSegIdx, newGKName) => {
+    setSegments(prev => prev ? changeGKFromSegment(prev, fromSegIdx, newGKName) : prev);
+    setIsSaved(false);
+    showToast(`${newGKName} is now in goal`);
+  }, [showToast]);
 
   // ── Manual player swap within a segment
   const handleSwap = useCallback((segIdx, swapAction) => {
@@ -503,7 +558,8 @@ export default function App() {
           </button>
           <button onClick={() => {
             setPlayersText(resumeData.playersText);
-            setLockGK(resumeData.lockGK);
+            if (resumeData.gkH1) setGkH1(resumeData.gkH1);
+            if (resumeData.gkH2) setGkH2(resumeData.gkH2);
             setSegments(resumeData.segments);
             setInitialSegData({ currentSeg: resumeData.currentSeg, matchStats: resumeData.matchStats || {} });
             setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: resumeData.currentSeg, isRunning: false });
@@ -539,7 +595,6 @@ export default function App() {
       <TeamSheetView
         players={players}
         segments={segments}
-        lockGK={lockGK}
         seasonGames={seasonGames}
         onSwap={handleSwap}
         onSave={handleSave}
@@ -556,6 +611,7 @@ export default function App() {
         onResetClock={resetClock}
         onResetGame={resetGame}
         onSplitSegment={handleSplitSegment}
+        onChangeGK={handleChangeGK}
         initialCurrentSeg={initialSegData.currentSeg}
         initialMatchStats={initialSegData.matchStats}
         onProgressUpdate={handleProgressUpdate}
@@ -579,8 +635,10 @@ export default function App() {
       <InputView
         playersText={playersText}
         setPlayersText={setPlayersText}
-        lockGK={lockGK}
-        setLockGK={setLockGK}
+        gkH1={gkH1}
+        setGkH1={setGkH1}
+        gkH2={gkH2}
+        setGkH2={setGkH2}
         onGenerate={handleGenerate}
         onReorder={handleReorder}
         onGoSeason={() => setView('season')}
