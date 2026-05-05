@@ -139,6 +139,9 @@ export default function TeamSheetView({
   const onProgressUpdateRef = useRef(onProgressUpdate);
   onProgressUpdateRef.current = onProgressUpdate;
   const debounceRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const wakeLockRef = useRef(null);
+  const lastBuzzSecRef = useRef(null);
 
   // Stable flush — cancels any pending debounce and writes immediately.
   // Used by visibilitychange and beforeunload handlers.
@@ -149,6 +152,40 @@ export default function TeamSheetView({
       onProgressUpdateRef.current(currentSegRef.current, matchStatsRef.current);
     }
   }, []); // empty deps — stable for the lifetime of this component
+
+  const unlockAudio = () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    } else if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  };
+
+  const acquireWakeLock = async () => {
+    try {
+      if (navigator.wakeLock) {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+      }
+    } catch (_) {}
+  };
+
+  const buzz = (freq = 660, duration = 0.3, volume = 0.5, startOffset = 0) => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(volume, ctx.currentTime + startOffset);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startOffset + duration);
+    osc.start(ctx.currentTime + startOffset);
+    osc.stop(ctx.currentTime + startOffset + duration);
+  };
+
+  const buzzEnd = () => {
+    [0, 0.15, 0.3, 0.45, 0.6].forEach(offset => buzz(880, 0.12, 0.8, offset));
+  };
 
   // Debounced save on every matchStats change.
   // ⚠️ Known data-loss window: a goal/assist recorded within 3 seconds of a sudden
@@ -169,6 +206,10 @@ export default function TeamSheetView({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushSave();
+      if (document.visibilityState === 'visible') {
+        audioCtxRef.current?.resume();
+        acquireWakeLock();
+      }
     };
     const handleBeforeUnload = () => flushSave();
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -187,9 +228,21 @@ export default function TeamSheetView({
   
   useEffect(() => {
     if (gameClock.isRunning && remainingMsTotal <= 0) {
+      buzzEnd();
       onAdvanceSegment?.();
     }
   }, [remainingMsTotal, gameClock.isRunning, onAdvanceSegment]);
+
+  useEffect(() => {
+    if (!isCritical || remainingSecsTotal <= 0) {
+      if (!isCritical) lastBuzzSecRef.current = null;
+      return;
+    }
+    if (remainingSecsTotal % 5 === 0 && lastBuzzSecRef.current !== remainingSecsTotal) {
+      lastBuzzSecRef.current = remainingSecsTotal;
+      buzz(660, 0.25, 0.5);
+    }
+  }, [remainingSecsTotal, isCritical]);
 
   useEffect(() => {
     if (gameClock.currentSegIdx !== null && gameClock.currentSegIdx !== currentSeg) {
@@ -311,7 +364,7 @@ export default function TeamSheetView({
 
               <div style={{ display: 'flex', gap: 8 }}>
                 {!gameClock.isRunning ? (
-                  <button onClick={() => { onStartPeriod?.(activeSegIdx); setShowClockMenu(false); }} style={{ flex: 1, padding: '8px', background: '#059669', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 900, cursor: 'pointer' }}>▶️ START / RESUME</button>
+                  <button onClick={() => { unlockAudio(); acquireWakeLock(); onStartPeriod?.(activeSegIdx); setShowClockMenu(false); }} style={{ flex: 1, padding: '8px', background: '#059669', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 900, cursor: 'pointer' }}>▶️ START / RESUME</button>
                 ) : (
                   <button onClick={() => { onPausePeriod?.(); setShowClockMenu(false); }} style={{ flex: 1, padding: '8px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 900, cursor: 'pointer' }}>⏸️ PAUSE</button>
                 )}
@@ -319,7 +372,7 @@ export default function TeamSheetView({
 
               <div style={{ display: 'flex', gap: 8, borderTop: '2px solid #e2ecfc', paddingTop: 8 }}>
                  <button onClick={() => { onResetClock?.(); setShowClockMenu(false); }} style={{ flex: 1, padding: '8px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 8, fontWeight: 800, cursor: 'pointer' }}>🔄 Reset Period</button>
-                 <button onClick={() => { onResetGame?.(); setShowClockMenu(false); }} style={{ flex: 1, padding: '8px', background: '#7f1d1d', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, cursor: 'pointer' }}>🗑️ Reset Game</button>
+                 <button onClick={() => { wakeLockRef.current?.release(); onResetGame?.(); setShowClockMenu(false); }} style={{ flex: 1, padding: '8px', background: '#7f1d1d', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, cursor: 'pointer' }}>🗑️ Reset Game</button>
               </div>
             </div>
           )}
@@ -652,6 +705,7 @@ export default function TeamSheetView({
                   if (stats.goals && stats.goals > 0) formattedGoals[p] = stats.goals;
                   if (stats.assists && stats.assists > 0) formattedAssists[p] = stats.assists;
                 });
+                wakeLockRef.current?.release();
                 onSave({ label: matchLabel, potm, captain, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null, notes: matchNotes });
                 setSaveOpen(false);
                 onGoSeason();

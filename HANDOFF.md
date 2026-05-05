@@ -1,39 +1,38 @@
-# MiniRoos Team Sheet Planner — Session Handoff
-*Last updated: 29 March 2026. Use this as the starting point for all new Claude Code sessions.*
-
----
-
-## 1. What the App Is
-
-A substitution and rotation planner for 9v9 junior (MiniRoos) soccer. The coach enters up to 12 player names (undersized squads below 9 are also supported), the app generates a full rotation schedule ensuring fair playing time and bench rotation, and the coach can manage the game live (swapping players, tracking goals, assigning POTM). Results are saved to a season history with fairness statistics.
+# MiniRoos Sub Planner — Technical Handoff
+*Last updated: 2026-05-05 (Session 7 complete)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
-**Live file (GitHub Pages):** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
-**Format:** Single self-contained offline HTML (~202 KB). Must stay this way — used on iPad at fields with no WiFi.
+**Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
+**Working dir:** `C:\Projects\football-sub-planner`
+**Format:** Single self-contained offline HTML. Must stay this way — used on iPad at fields with no WiFi.
 
 ---
 
-## 2. Project Structure
+## Rule for every session
+Read `Football sub planner.md` in Obsidian and this file before touching any code. Present the plan before changing anything. Update this file at the end of the session with what was changed.
+
+---
+
+## Project Structure
 
 ```
 football-sub-planner/
 ├── src/
 │   ├── App.jsx                    # Root component — state, routing, handlers
 │   ├── scheduler.js               # Core rotation algorithm (bench slots, GK, stats)
-│   ├── constants.js               # Positions, colours, field layout, default players
+│   ├── constants.js               # Positions, colours, field layout, STORAGE_KEY, IN_PROGRESS_KEY
 │   └── components/
-│       ├── InputView.jsx          # Setup screen (player list, GK toggle, import)
-│       ├── TeamSheetView.jsx      # Main result screen (Field / Schedule / Stats tabs)
-│       ├── SeasonView.jsx         # Season tracker (game history, totals, fairness)
+│       ├── InputView.jsx          # Setup screen — player list, H1/H2 GK picker dropdowns, import/export
+│       ├── TeamSheetView.jsx      # Live game screen — field, clock, swaps, notes, save modal
+│       ├── SeasonView.jsx         # Season tracker — game history, fairness stats, edit modal
 │       ├── FieldView.jsx          # Interactive field diagram with player tokens
 │       ├── PlayerToken.jsx        # Circular player badge (colour, rings, size)
 │       ├── SwapPanel.jsx          # Edit-mode swap selection display
 │       ├── FieldSVG.jsx           # Raw SVG field background
-│       └── Toggle.jsx             # Custom toggle switch (GK full-game option)
+│       └── Toggle.jsx             # Custom toggle switch
 ├── team-sheet-offline.html        # Built output — this is what goes on GitHub Pages
-├── package.json                   # npm scripts incl. "release" (build + copy HTML)
+├── package.json
 ├── vite.config.js                 # vite-plugin-singlefile bundles everything inline
-├── CLAUDE_CODE_HANDOFF.md         # Original spec document (reference — some sections outdated)
 └── HANDOFF.md                     # THIS FILE
 ```
 
@@ -46,7 +45,7 @@ git add team-sheet-offline.html src/ && git commit -m "..." && git push origin m
 
 ---
 
-## 3. Formation & Field
+## Formation & Field
 
 **Fixed 9v9 formation:** `GK · LB · CB · RB · LM · CM · RM · LF · RF`
 
@@ -63,7 +62,7 @@ git add team-sheet-offline.html src/ && git commit -m "..." && git push origin m
 | LF  | 30 | 19 |
 | RF  | 70 | 19 |
 
-All row gaps are uniform at 23% to ensure the sub label below each token never overlaps the row below.
+All row gaps are uniform at 23% so the sub label below each token never overlaps the row below.
 
 ### Position colour scheme (LOCKED — do not change)
 | Position | Background | Text |
@@ -73,214 +72,172 @@ All row gaps are uniform at 23% to ensure the sub label below each token never o
 | CB, CM | Light grey `#b0bec5` | Dark `#0f172a` |
 | RB, RM, RF | **Black `#111827`** | White `#ffffff` |
 
-> ⚠️ RB/RM/RF are BLACK. The original `CLAUDE_CODE_HANDOFF.md` incorrectly described them as "light grey". Do not change them.
+> ⚠️ RB/RM/RF are BLACK. `CLAUDE_CODE_HANDOFF.md` incorrectly described them as light grey — do not change them.
 
 ### Token sizing (`src/components/FieldView.jsx`)
-Token size is calculated from the **field container width** (via ResizeObserver), not `window.innerWidth`:
+Token size calculated from field container width via ResizeObserver (not `window.innerWidth`):
 ```js
 size = Math.min(108, Math.max(40, Math.round(containerWidth * 0.21)))
 ```
-Font size inside the circle: `Math.max(8, size * 0.19)`.
-
-### Token layout
-- **Player name** — centred in the circle, 2-line clamp, `lineHeight: 1.25`
-- **Position label** — inside the circle, absolutely positioned at the bottom edge (`bottom: 7`), same colour as the player name text, no shadow
-- **Sub label** — rendered below the circle for every token (always reserves space via `visibility: hidden` when no sub is scheduled), turns visible green pill showing `▲ [name] / @ X min` when a substitution is coming
+Font size: `Math.max(8, size * 0.19)`.
 
 ---
 
-## 4. Rotation & Scheduling Logic
+## Rotation & Scheduling Logic
 
 ### Segment schedules by squad size (`src/scheduler.js` → `getSegmentConfig`)
-| Players | Segments | Durations | HT after seg (0-based) | Bench spots |
-|---------|----------|-----------|----------------------|-------------|
-| ≤9 | 1  | [50]                           | -1 (no bench) | 0 |
-| 10 | 10 | [5,5,5,5,5,5,5,5,5,5]         | 4             | 1 |
-| 11 | 6  | [5,10,10,10,10,5]              | 2             | 2 |
-| 12 | 4  | [10,15,10,15]                  | 1             | 3 |
+| Players | Segments | Durations | HT after seg | Bench spots |
+|---------|----------|-----------|-------------|-------------|
+| ≤9 | 2 | [25, 25] | 0 | 0 |
+| 10 | 10 | [5,5,5,5,5,5,5,5,5,5] | 4 | 1 |
+| 11 | 6 | [5,10,10,10,10,5] | 2 | 2 |
+| 12 | 4 | [10,15,10,15] | 1 | 3 |
 
-> ⚠️ The original `CLAUDE_CODE_HANDOFF.md` incorrectly listed 10 players as `5 × 10 min`. The correct implementation is `10 × 5 min` with HT after segment 4.
+> ⚠️ 9-player games produce two 25-min segments (H1/H2), not one 50-min segment. The `benchSize <= 0` block in `buildSchedule` returns two hardcoded segments — do not route 9-player through the rotation engine.
 
-> **Undersized squads (< 9):** `getSegmentConfig` returns the single-segment config for any squad ≤ 9. `buildSchedule` uses `benchSize <= 0` to enter the no-bench path, with null-coalescing on outfield assignment to handle missing players safely.
+### `buildSchedule` API
+```js
+buildSchedule(players, { gkH1, gkH2 })
+```
+Changed in Session 6 from `(players, lockGKBoolean)`. Reorders players internally so slot-based bench math works with the chosen GKs.
 
 ### Segment object shape
 ```js
 {
-  segIdx:     number,           // 0-based
-  assignment: { GK, LB, CB, RB, LM, CM, RM, LF, RF },  // name strings
-  bench:      string[],         // 0–3 player names
-  gkName:     string,           // = assignment.GK
-  duration:   number,           // minutes
-  label:      string,           // "H1 0–10", "H2 25–35" etc.
+  segIdx:     number,
+  assignment: { GK, LB, CB, RB, LM, CM, RM, LF, RF },
+  bench:      string[],
+  gkName:     string,
+  duration:   number,
+  label:      string,   // "H1 0–25", "H2 25–50" — en dash, no "min" suffix
   half:       1 | 2,
-  htBefore:   boolean,          // true on first segment of H2
-  subBefore:  boolean,          // true if a sub precedes this segment
-  edited:     boolean,          // true if manually swapped
+  htBefore:   boolean,
+  subBefore:  boolean,
+  edited:     boolean,
 }
 ```
 
-### Segment labels
-```
-9 players:  "H1 0–50"
-Others:     "H1 0–10", "H1 10–25", "H2 25–35", "H2 35–50"
-```
-No "min" suffix. En dash (–), not hyphen (-).
+### Position persistence after swap (`App.jsx` → `handleSwap`)
+When a player is swapped in segment N, positions propagate forward through subsequent segments in the same half. Stops at `htBefore: true`. Do not simplify this logic.
 
-### Position persistence after a swap (`src/App.jsx` → `handleSwap`)
-When the user swaps two players in segment N, positions propagate forward through all subsequent segments in the **same half**:
-- Every player who stays on field keeps the exact position they held after the swap.
-- Players coming on from bench slot into the positions vacated by those going off.
-- Propagation stops at `htBefore: true` (half-time resets positions).
-
-This is implemented in `handleSwap` in `App.jsx` — do not revert or simplify this logic.
+### GK helpers (`src/scheduler.js`)
+- `orderPlayersForGame(players, savedGames)` — fairness oracle: ranks by GK stint count, with a recency tiebreak (`lastGKGame`) for ties. Single source of truth for GK suggestions.
+- `getSecondGKSlot(n)` — index in ordered list for H2 GK. Returns `1` for ≤9 players.
+- `changeGKFromSegment(segments, fromSegIdx, newGKName)` — in-game swap: trades new GK with previous GK across remaining segments in the current half.
+- `suggestGKs` **deleted** in Session 6.
 
 ---
 
-## 5. Data Structures
+## Data Structures
 
 ### Saved game object (`localStorage` → `teamsheet_season`)
 ```js
 {
-  date:     "D/M/YYYY",              // e.g. "22/3/2026"
-  label:    string,                  // optional match label e.g. "vs Eastside FC"
-  players:  string[],                // ordered player list at save time
-  segments: Segment[],               // full rotation (including edits)
+  date:          "D/M/YYYY",
+  label:         string,
+  players:       string[],
+  segments:      Segment[],
   stats: {
-    minutesMap:     { [player]: number },   // total minutes 0–50
-    gkDutyMap:      { [player]: 0 | 1 },   // 1 if player was GK
-    playerSchedule: { [player]: string[] }, // position or "BENCH" per segment
+    minutesMap:     { [player]: number },
+    gkDutyMap:      { [player]: 0 | 1 },
+    playerSchedule: { [player]: string[] },
   },
-  goals:  { [player]: number },      // only non-zero values stored
-  potm:   string | null,
+  goals:         { [player]: number },
+  assists:       { [player]: number },
+  potm:          string | null,
+  captain:       string | null,
+  notes:         string,
+  opponentGoals: number,
 }
 ```
 
-> ⚠️ **Pending change:** `goals` currently stores goals only. Assists and the final match scoreline need to be added. See §6 — Next Tasks.
+Use `segment.half` to derive GK H1/H2 split — do not rely on `gkDutyMap` alone.
 
 ### Export/import format
 ```js
 { version: 1, exported: "ISO8601", games: SavedGame[] }
 ```
-Deduplication key: `date + JSON.stringify(players) + label`.
+Dedup key: `date + JSON.stringify(players) + label`.
 
 ---
 
-## 6. Next Tasks (Priority Order)
+## Session History
 
-### 6.1 ✅ Increase player circle size — DONE
-**What:** Tokens on the field feel too small, especially on iPad.
-**Where:** `src/components/PlayerToken.jsx` (the `size` prop) and `src/components/FieldView.jsx` (where size is calculated and passed in).
-**Current formula:**
-```js
-Math.min(120, Math.max(40, Math.round(window.innerWidth * 0.085)))
-```
-**Suggested approach:** Increase the multiplier and/or minimum. For example:
-```js
-Math.min(130, Math.max(56, Math.round(window.innerWidth * 0.10)))
-```
-At 768px (iPad) this gives ~77px vs current ~65px. Also check that tokens don't overlap at larger sizes — field positions are fixed percentages so bigger tokens may crowd on smaller screens.
-**Also check:** The font size inside the circle scales as `size * 0.175` — may need bumping slightly for readability at larger sizes.
-**Test at:** 375px (phone), 768px (iPad), 1024px (iPad Pro / desktop).
+### Session 1 — Persistence hardening ✅
+- Debounced save (3s) on every `matchStats` change in `TeamSheetView`
+- Flush on `visibilitychange` (primary iPad path) and `beforeunload` (desktop fallback)
+- ErrorBoundary "Recover Last Game" button when in-progress data exists
+- Modal "Not Now" no longer clears localStorage
+- Blue resume banner on setup screen — cleared only on explicit Discard or new game generation
 
----
+### Session 2 — 9-player H1/H2 split ✅
+- `getSegmentConfig` ≤9: `{ durs: [25, 25], htAfterSeg: 0 }`
+- `buildSchedule` `benchSize <= 0` block: two hardcoded 25-min segments
+- `getSecondGKSlot` ≤9: returns `1` (was `-1`) — fixes season GK stats skew
 
-### 6.2 Remove all glow and animation from tokens
-**What:** The player tokens currently have animated effects — a spinning dashed green ring on swap targets, an animated yellow glow ring on highlighted players, and a box-shadow glow on selected/target/highlighted states. These feel distracting. Remove all of them, keeping only the static visual differentiation (background colour change, border colour change).
+### Session 3 — UX modal refinements ✅
+- Backdrop div closes player panel on outside tap
+- Field elevates to z-index 99 when modal open — tokens remain tappable
+- "Move Player" button: sets `swapFrom` + `editMode`, closes panel
 
-**Where:** `src/components/PlayerToken.jsx`
+### Session 4 — Captain tracker + stats ✅
+- `captain` field added to saved game object
+- Save modal: Captain dropdown, pre-suggested from last win's captain (shown even if absent from squad)
+- Season leaderboard: Captain column, GK split into H1/H2, bench in minutes, Top Positions column
 
-**Changes needed:**
-1. **Remove the spinning target ring** — delete the `isTgt` ring div entirely (the one with `animation: 'spin 2.5s linear infinite'`). The green background colour on the circle already signals it's a valid swap target.
-2. **Remove the animated glow ring** — delete the `isHL` ring div (the one with `animation: 'glow 1.5s ease-in-out infinite'`). Highlighted state is already clear from the amber circle gradient.
-3. **Remove the `@keyframes spin` and `@keyframes glow` CSS** — these are injected via a `<style>` tag somewhere in the component tree (likely `FieldView.jsx` or `TeamSheetView.jsx`). Find and delete them.
-4. **Simplify box-shadows** — replace glow box-shadows on `isSel`, `isTgt`, `isHL` states with a simple non-glowing shadow (e.g. `'0 2px 8px rgba(0,0,0,0.25)'`) or remove the shadow variation entirely.
+### Session 5 — Match journal ✅
+- `matchNotes` state in `TeamSheetView`; always-visible textarea in bench panel
+- `notes` persisted as `notes: notes || ''`
+- Season view: 📝 badge on history cards; notes textarea in Edit modal
 
-**What to keep:**
-- The `isSel` selection ring (static blue border, no animation) — this clearly shows which token is selected for swapping
-- Background colour and border colour changes for all states (these are static, not animated)
+### Session 6 — GK picker, in-game GK swap, honours sheet ✅
+**Bugs fixed:**
+- GK subbed mid-half — bench rotation baked before override; fixed by making GK explicit before schedule builds
+- Notes saved but not rendered in season summary — now shown inline in expanded match card
+- Manual GK overrides clobbered by Balance & Generate — manual picks now survive
+- H1/H2 collapsing to same player — collision guard: if oracle H2 == preserved H1, fall back to oracle H1
+- Suggestion not truly round-robin — `lastGKGame` recency tiebreak added to `orderPlayersForGame`
 
----
+**Features:**
+- GK picker on setup screen: H1/H2 dropdowns auto-suggested from oracle, fully overridable
+- 🧤 ALLOCATE GK button in bench panel: mid-game swap modal, trades new GK across remaining half segments
+- 🏆 Honours sheet in game-screen header: POTW and captain counts from saved games
 
-### 6.4 Player number on token
-**What:** Optional player number displayed inside the token at the top — mirroring the position label at the bottom. When enabled, each player is assigned a squad number (1–99) in the setup screen and it appears on their token during the game.
-
-**Where:**
-- `src/components/InputView.jsx` — setup screen, add optional number input per player (or a numbered list the coach can assign)
-- `src/App.jsx` — pass `playerNumbers: { [name]: number }` through to `TeamSheetView` and down to `FieldView` / `PlayerToken`
-- `src/components/PlayerToken.jsx` — add `number` prop; render it identically to the position label but at `top: 7` (inside the circle, top edge). Same font size (`Math.max(6, Math.round(size * 0.15))`), same colour as `nameText`, no shadow.
-
-**Design rules:**
-- The number label is absolutely positioned inside the circle at `top: 7, left: 0, right: 0, textAlign: 'center'` — the mirror image of the position label at `bottom: 7`
-- Show/hide is controlled by whether a number is assigned; no number = nothing rendered (position is already reserved by the circle size)
-- Numbers are per-player (not per-position) and persist across segments
-
-**Data shape addition:**
-```js
-// In App state, add alongside players[]:
-playerNumbers: { [playerName]: number | null }  // null = no number assigned
-```
+**Architecture:**
+- `buildSchedule` API: `(players, lockGKBoolean)` → `(players, { gkH1, gkH2 })`
+- `suggestGKs` deleted — oracle is single source of truth
+- `changeGKFromSegment` helper added
 
 ---
 
-### 6.3 Match result — scoreline
-**What:** Record the final match score (our team's goals vs opponent). Currently only per-player goal counts are tracked; there is no opponent score or final result field.
-**Where:**
-- `src/components/TeamSheetView.jsx` — Save panel (currently has match label, POTM, per-player goals)
-- `src/App.jsx` → `handleSave` — assembles the game object before storing
-- `src/components/SeasonView.jsx` — displays game cards in the season list
+### Session 7 — Period buzzer + screen wake lock ✅
+**Features:**
+- **Screen Wake Lock** — acquired on clock START, released on Save Game and Reset Game, re-acquired on `visibilitychange` (screen unlock). Prevents iPad auto-locking during a match so subs are never missed.
+- **Period-end buzzer** — five rapid beeps (880Hz) when a period ends (`remainingMsTotal <= 0`).
+- **Critical warning buzz** — single beep (660Hz) every 5 seconds when ≤30s remains (fires at 30, 25, 20, 15, 10, 5s). `lastBuzzSecRef` prevents double-fire on the 500ms tick.
+- **Audio unlock** — `AudioContext` created/resumed on START tap; also resumed in `visibilitychange` handler so audio works after screen unlock.
 
-**Changes needed:**
-1. **Save panel** — add an "Opponent score" number input (0–20 spinner or ±1 buttons, same style as goal counters). "Our score" is auto-calculated by summing all per-player goal counts — show it as a read-only display so the coach can see the running total.
-2. **Game object** — add `opponentGoals: number` to the saved game structure. `ourGoals` can be derived from `goals` at display time (sum of all player values) so it doesn't need to be stored separately.
-3. **Season game cards** — display result as `2–1 W`, `1–3 L`, `0–0 D` (using green/red/grey colouring) in the card summary line.
-4. **Season totals** — add a W/D/L record at the top of the season totals panel.
-
-**Data shape addition:**
-```js
-// In saved game object, add:
-opponentGoals: number,   // defaults to 0 if not recorded
-```
+**Files changed:** `src/components/TeamSheetView.jsx` only.
+**New refs:** `audioCtxRef`, `wakeLockRef`, `lastBuzzSecRef`.
+**New helpers:** `unlockAudio()`, `acquireWakeLock()`, `buzz(freq, duration, volume, startOffset)`, `buzzEnd()`.
 
 ---
 
-### 6.5 Assist tracking
-**What:** Track which player provided the assist for each goal, alongside goals.
-**Where:** Same places as 6.2 — journey panel on the field tab, save panel, season totals.
-
-**Changes needed:**
-1. **Journey panel** (shown when a player is highlighted on the Field tab, `TeamSheetView.jsx`): Currently shows ±1 goal counter. Add a second ±1 counter for assists. Display as "⚽ 2  🅰️ 1" style.
-2. **Save panel** (`TeamSheetView.jsx`): Per-player row already has ±1 goal counter. Add ±1 assist counter in the same row. Consider compact layout: `[Name]  ⚽ [−][0][+]  🅰️ [−][0][+]`.
-3. **State in `TeamSheetView.jsx`**: Currently has `const [goals, setGoals] = useState({})`. Add `const [assists, setAssists] = useState({})` alongside it.
-4. **Game object** (`App.jsx` → `handleSave`): Add `assists: { [player]: number }` parallel to `goals`.
-5. **Season view** (`SeasonView.jsx`): Add assist totals to per-player season stats row, e.g. `⚽×3  🅰️×2`.
-6. **Edit game modal** (`SeasonView.jsx`): Add ±1 assist counters alongside the existing ±1 goal counters.
-
-**Data shape addition:**
-```js
-// In saved game object, add:
-assists: { [player]: number },  // only non-zero values stored (same pattern as goals)
-```
+## Known Issues & Watch List
+- **PWA / Safari cache on iPad:** Safari caches the HTML aggressively after any push. Workaround: Private Browsing tab to force a fresh fetch. Long-term: cache-busting meta tags + service worker auto-update.
+- **Preview tool connects to wrong tab:** Test manually at `http://localhost:5173` — don't trust Claude preview screenshot.
+- **Debounce data-loss window:** 3s means up to 3s of goal/assist data lost on sudden crash. Known accepted trade-off.
+- **`visibilitychange` is primary save trigger on iOS** — `beforeunload` alone is unreliable on iPad and must never be the sole flush mechanism.
+- **Safari ITP** clears localStorage after 7 days of non-use. Export/Import buttons on Setup and Season screens are the safety net — do not remove them.
+- **12-player bench is inherently unequal** — 10min and 15min slots. Season fairness corrects over multiple games.
 
 ---
 
-### 6.6 Improve statistics display
-**What:** The Stats tab currently shows playing time bars with minute counts and a bench badge. It could be more informative.
-
-**Suggested improvements (discuss with user before building):**
-- **Position frequency badges** — show which positions a player played this game (e.g. "CM×2, LM×1") in the stats tab, not just total minutes
-- **Time spread** — the min/max minute spread is already shown; add a visual "fairness meter" (green/amber/red) in a more prominent way
-- **GK half indicator** — currently shows 🧤 if player was GK at all; consider showing 🧤H1 or 🧤H2 to distinguish which half
-- **Bench count** — currently shows 🪑×N bench segments; could additionally show bench minutes not just segment count (more accurate for 12-player squads where bench durations differ)
-- **Season context** — when season data exists, show each player's season average minutes/game alongside their current game minutes
-
----
-
-## 7. UI Rules (Must Follow)
-
-- **No `window.confirm()` or `window.alert()`** — sandboxed iframe environment. All confirmations use inline modal overlays.
-- **Toast notifications:** 2800ms auto-dismiss. Two variants: `ok` (green) and `err` (red). Shown via `showToast(msg, type)` in `App.jsx`.
-- **Date format:** `D/M/YYYY` — not zero-padded (1/3/2026, not 01/03/2026).
-- **Colour palette** (do not change):
+## UI Rules (Must Follow)
+- **No `window.confirm()` or `window.alert()`** — sandboxed iframe. All confirmations use inline modal overlays.
+- **Toast notifications:** 2800ms auto-dismiss. `ok` (green) / `err` (red) via `showToast(msg, type)` in `App.jsx`.
+- **Date format:** `D/M/YYYY` — not zero-padded.
+- **Colour palette (do not change):**
   - Page background: `#f0f6ff`
   - Primary text: `#0f2d5a`
   - Blue accent: `#1558b0` / `#1d6fcf`
@@ -289,39 +246,10 @@ assists: { [player]: number },  // only non-zero values stored (same pattern as 
   - Red: `#dc2626`
   - Magenta (GK): `#d946ef`
 - **No external fonts** — system-ui / Segoe UI only.
-- **Offline first** — no CDN, no network calls, everything compiled into the single HTML file.
+- **Offline first** — no CDN, no network calls, everything compiled into the single HTML.
 
 ---
 
-## 8. What Was Changed in Recent Sessions
+## Starting Prompt for a New Session
 
-### Session 3 (29 March 2026) — Algorithm: undersized squads, positional continuity, cleanup
-1. **Undersized squad support** — `getSegmentConfig` now handles squads ≤ 9 via an early guard (`if (squadSize <= 9)`). `buildSchedule` condition changed from `benchSize === 0` to `benchSize <= 0` with null-coalescing (`?? null`) on outfield assignment to prevent undefined player slots.
-2. **Positional continuity** — `buildSchedule` now tracks each player's last outfield position in a `lastOutfieldPos` map. When players return from the bench, a two-pass reconciliation prefers their previous position (pass 1) before falling back to index-based assignment (pass 2). Applies to both regular subs and half-time GK rotation.
-3. **DRY fix in `getSecondGKSlot`** — removed hardcoded `cfg` object; now calls `getSegmentConfig(squadSize)` and derives `nSegs` and `benchSize` dynamically.
-4. **`applySwap` modernised** — replaced `JSON.parse(JSON.stringify(segment))` with `structuredClone(segment)`.
-5. **Gemini UI handoff** — created `GEMINI_UI_HANDOFF.md` for UI/UX review by a separate AI agent.
-
-### Session 2 — UI: field layout, tokens, sub overlays
-1. **Sub info bar redesigned** — replaced small pale yellow bar with a prominent amber card (`#fff7ed`, `2px solid #f59e0b`). Time shown as large header (`⏱ X min`), each sub as a separate row with large red pill (▼ off) → green pill (▲ on) + position badge.
-2. **Field sub overlays** — each token at a position being subbed shows a green label below (`▲ Name / @ X min`). Space is always reserved via `visibility: hidden` so tokens never shift when the label appears.
-3. **Token layout** — position label moved inside the circle (bottom edge, `bottom: 7`), matching player name colour, no shadow. Frees space below each token for the sub label.
-4. **Uniform row spacing** — all row gaps equalised to 23% (LF y=19, LM y=42, LB y=65, GK y=88).
-5. **Token sizing** — switched from `window.innerWidth` to container `ResizeObserver` width for accurate scaling. Formula: `Math.min(108, Math.max(40, Math.round(w * 0.21)))`.
-6. **Preview viewport** — set to tablet (768px) as default test size.
-
----
-
-## 9. Known Constraints
-
-- **Safari ITP** clears localStorage for sites not visited in 7 days. The Export (💾) and Import (📂) buttons on both the Setup and Season Tracker screens are the safety net for this. Do not remove them.
-- **12-player bench is inherently unequal** — bench slots of 10 min and 15 min can't be equalised. The season-level fairness tracker corrects this over multiple games.
-- **Single formation** — Formation is fixed as 9v9. Multi-formation support (for different age groups) is a future planned feature — see original `CLAUDE_CODE_HANDOFF.md` §9 for context.
-
----
-
-## 10. Starting Prompt for a New Claude Code Session
-
-> "I'm working on a React + Vite single-file HTML app for planning MiniRoos (9v9 junior soccer) substitutions. Read `HANDOFF.md` first — it is the authoritative description of the current codebase. Then read the specific source file(s) relevant to the task before making any changes. The build command is `npm run release` which outputs `team-sheet-offline.html` — run this and confirm it builds clean (no errors) after any changes."
-
-Then describe the specific task from §6 above.
+> "Read `CLAUDE.md` first, then `HANDOFF.md` — it is the authoritative technical reference. Then read the relevant source files before making any changes. Build with `npm run release` and confirm clean output after any changes."
