@@ -1,2 +1,11 @@
 node_modules/
 dist/
+
+# Local Claude Code settings — machine-specific permissions
+.claude/settings.local.json
+
+# Local project rules — not for sharing
+CLAUDE.md
+
+# Separate project sitting alongside this one with its own git repo
+MiniRoosSubPlanner/
