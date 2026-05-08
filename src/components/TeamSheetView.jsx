@@ -234,17 +234,6 @@ export default function TeamSheetView({
   }, [remainingMsTotal, gameClock.isRunning, onAdvanceSegment]);
 
   useEffect(() => {
-    if (!isCritical || remainingSecsTotal <= 0) {
-      if (!isCritical) lastBuzzSecRef.current = null;
-      return;
-    }
-    if (remainingSecsTotal % 5 === 0 && lastBuzzSecRef.current !== remainingSecsTotal) {
-      lastBuzzSecRef.current = remainingSecsTotal;
-      buzz(660, 0.25, 0.5);
-    }
-  }, [remainingSecsTotal, isCritical]);
-
-  useEffect(() => {
     if (gameClock.currentSegIdx !== null && gameClock.currentSegIdx !== currentSeg) {
       const nextIdx = gameClock.currentSegIdx;
       setCurrentSeg(nextIdx);
@@ -270,6 +259,18 @@ export default function TeamSheetView({
   
   const isWarning = remainingSecsTotal <= 120 && remainingSecsTotal > 30;
   const isCritical = remainingSecsTotal <= 30 && remainingSecsTotal > 0;
+
+  useEffect(() => {
+    if (!isCritical || remainingSecsTotal <= 0) {
+      if (!isCritical) lastBuzzSecRef.current = null;
+      return;
+    }
+    if (remainingSecsTotal % 5 === 0 && lastBuzzSecRef.current !== remainingSecsTotal) {
+      lastBuzzSecRef.current = remainingSecsTotal;
+      buzz(660, 0.25, 0.5);
+    }
+  }, [remainingSecsTotal, isCritical]);
+
   const clockColor = isCritical ? '#dc2626' : isWarning ? '#d97706' : '#059669';
   const clockBg = isCritical ? '#fee2e2' : isWarning ? '#fffbeb' : '#ecfdf5';
 
