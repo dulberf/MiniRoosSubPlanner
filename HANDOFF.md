@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-05-05 (Session 7 complete)*
+*Last updated: 2026-05-09 (Session 8 complete)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -20,6 +20,7 @@ football-sub-planner/
 ├── src/
 │   ├── App.jsx                    # Root component — state, routing, handlers
 │   ├── scheduler.js               # Core rotation algorithm (bench slots, GK, stats)
+│   ├── replan.js                  # Mid-game roster change handler (late arrival / injury)
 │   ├── constants.js               # Positions, colours, field layout, STORAGE_KEY, IN_PROGRESS_KEY
 │   └── components/
 │       ├── InputView.jsx          # Setup screen — player list, H1/H2 GK picker dropdowns, import/export
@@ -210,12 +211,58 @@ Dedup key: `date + JSON.stringify(players) + label`.
 
 ---
 
+### Session 8 — Mid-game roster change (late arrival / injury) ✅
+**Problem:** A player arrived 5 min late to a 9-player game. The schedule was baked at kickoff for 9 players (no rotation), so the engine had no way to incorporate the late arrival fairly. Result: one player ended up with a single odd sub stint, minutes were wrong.
+
+**Decision:** Parallel-track rewrite (long term) confirmed; this is the short-term patch to make the current app usable for the rest of the season. Equal share for the remainder — no catch-up weighting for the late player.
+
+**New file:** `src/replan.js` — fully isolated module. Imports only `splitSegment` and `getSegmentConfig` from `scheduler.js`. All internal helpers pure (no input mutation, no React).
+- `replanFromRosterChange(state, event)` — public API. Validates, splits the active segment at live clock time, rebuilds remainder for the new squad size.
+- Helpers: `getHalfTemplate`, `scaleTemplate` (proportionally fits standard durations to remaining minutes), `buildRemainderForHalf`, `buildFreshHalf`, `chooseH2GK`, `pickReplacement`, `computeCumulativeMinutes`, `buildLastOutfieldPos`.
+- Reuses scheduler's positional-continuity pattern (`lastOutfieldPos`) for cleaner UX across the boundary.
+
+**App.jsx:**
+- New `handleRosterChange(event)` callback (~50 LOC). Mirrors `handleSplitSegment`'s clock-pause + advance pattern.
+- Derives an "active roster" from the current segment before calling replan — this lets the engine see the post-injury squad even though `players` (the React state) still contains removed names so `calcStats` can attribute their accrued minutes.
+- For "add" events, `setPlayersText` appends; for "remove" events, `players` stays intact (Lyla still appears in season view stats with her partial minutes).
+
+**TeamSheetView.jsx:**
+- Two new bench-panel buttons: `➕ LATE PLAYER` and `➖ PLAYER OUT`. Side-by-side, gated by `!editMode && !isEffectivelyLocked`.
+- Two new modals styled after the existing GK picker. Late player: name input + validation summary. Player out: dropdown of active players + (if on field) replacement dropdown defaulting to most-rested bench player.
+- **Header now derives squad from segments**, not `players.length`: `activeSquadSize` and `benchSize` computed from `seg.assignment + seg.bench`. This keeps the header accurate after any roster change and works without disturbing the saved-game stats logic.
+
+**Edge cases handled (via validation in `replan.js`):**
+- Removed player IS the current GK → blocks with "Pick a new goalkeeper first using ALLOCATE GK".
+- Roster would drop below 6 → blocks.
+- Roster would exceed 12 → blocks.
+- Late name already in active squad → blocks.
+- Clock not started (`currentSegIdx === null`) → blocks.
+- Removed player IS H2 GK and event is in H1 → reassigns H2 GK, surfaces as warning toast.
+- Drop below 9 (sub-bench territory) → ALLOWED. Builds a single segment for the rest of the half with `null` in the vacated position(s), matching `buildSchedule`'s ≤9-player pattern.
+
+**Manually verified scenarios (in dev preview):**
+- 9 → 10 mid-H1 at ~5 min (today's case): ✓ locked H1 0–5 + 5×4min H1 remainder + 5×5min H2
+- 12 → 11 mid-H1 at ~3:45: ✓ locked H1 0–4 + 11-player H1 template scaled to remainder + 11-player H2 template
+- 11 → 12 (late arrival on top of injury): ✓ active squad correctly recomputed; 12-player template applied to remainder
+- All segment durations sum to exactly 50 min in every case
+- Locked segment counts only past-played players for accrued minutes
+- No console errors, no React warnings
+
+**Known v1 limitations (deferred to rewrite):**
+- The replan re-bakes the H2 schedule when the event is in H1. If the coach wants to "preserve" certain H2 plans, those are lost.
+- No undo for roster events.
+- 1-minute granularity on the split point (matches the existing `splitSegment` convention).
+
+---
+
 ### Session 7 — Period buzzer + screen wake lock ✅
 **Features:**
 - **Screen Wake Lock** — acquired on clock START, released on Save Game and Reset Game, re-acquired on `visibilitychange` (screen unlock). Prevents iPad auto-locking during a match so subs are never missed.
 - **Period-end buzzer** — five rapid beeps (880Hz) when a period ends (`remainingMsTotal <= 0`).
 - **Critical warning buzz** — single beep (660Hz) every 5 seconds when ≤30s remains (fires at 30, 25, 20, 15, 10, 5s). `lastBuzzSecRef` prevents double-fire on the 500ms tick.
 - **Audio unlock** — `AudioContext` created/resumed on START tap; also resumed in `visibilitychange` handler so audio works after screen unlock.
+
+**Bug fixed (same session):** Critical buzz `useEffect` had `[remainingSecsTotal, isCritical]` in its dependency array but both consts were declared below the `useEffect` call in the component body. React evaluates deps immediately during render, hitting the TDZ — production build crashed on load. Fixed by moving the effect to after the `isCritical` declaration.
 
 **Files changed:** `src/components/TeamSheetView.jsx` only.
 **New refs:** `audioCtxRef`, `wakeLockRef`, `lastBuzzSecRef`.

@@ -9,6 +9,7 @@ import TeamSheetView  from './components/TeamSheetView.jsx';
 import SeasonView     from './components/SeasonView.jsx';
 
 import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment, changeGKFromSegment, getSecondGKSlot } from './scheduler.js';
+import { replanFromRosterChange } from './replan.js';
 import { STORAGE_KEY, IN_PROGRESS_KEY, DEFAULT_PLAYERS } from './constants.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -214,6 +215,83 @@ export default function App() {
     setIsSaved(false);
     showToast(`${newGKName} is now in goal`);
   }, [showToast]);
+
+  // ── Mid-game roster change (late arrival or injury) ─────────────────────
+  // Splits the active segment at the live clock time, locks the past portion,
+  // and rebuilds the rest of the game for the new squad size. See replan.js
+  // for the details. Equal share for the remainder — no catch-up weighting.
+  const handleRosterChange = useCallback((event) => {
+    setGameClock(prevClock => {
+      if (prevClock.currentSegIdx === null) {
+        showToast("Game hasn't started — update the squad on Setup.", 'err');
+        return prevClock;
+      }
+
+      // Reuse the exact elapsed-time formula from handleSplitSegment so the
+      // split point matches what the coach sees on the clock display.
+      const elapsedMs = prevClock.accumulatedMs +
+        (prevClock.isRunning && prevClock.segmentStartTime ? Date.now() - prevClock.segmentStartTime : 0);
+      const elapsedMinutes = Math.max(0, Math.round(elapsedMs / 60000));
+
+      const currentSegments = segmentsRef.current;
+      if (!currentSegments) {
+        showToast('No game in progress.', 'err');
+        return prevClock;
+      }
+
+      // Derive the ACTIVE roster from the current segment (post any earlier
+      // injury, the React `players` list still holds removed names so calcStats
+      // can attribute their accrued minutes). Active = on field + on bench.
+      const activeSeg = currentSegments[prevClock.currentSegIdx];
+      const activeSet = new Set();
+      if (activeSeg) {
+        Object.values(activeSeg.assignment).forEach(n => { if (n) activeSet.add(n); });
+        activeSeg.bench.forEach(n => { if (n) activeSet.add(n); });
+      }
+      const activePlayers = players.filter(p => activeSet.has(p));
+
+      let result;
+      try {
+        result = replanFromRosterChange(
+          {
+            segments:       currentSegments,
+            players:        activePlayers.length > 0 ? activePlayers : players,
+            currentSegIdx:  prevClock.currentSegIdx,
+            elapsedMinutes,
+            gkH1, gkH2,
+          },
+          event
+        );
+      } catch (err) {
+        showToast(err.message, 'err');
+        return prevClock;
+      }
+
+      const { newSegments, newPlayers, warnings } = result;
+
+      setSegments(newSegments);
+      if (event.type === 'add' && !players.includes(event.name.trim())) {
+        // Append the new name to the existing roster (preserves any earlier
+        // removed players so calcStats keeps their accrued minutes)
+        setPlayersText([...players, event.name.trim()].join('\n'));
+      }
+      setIsSaved(false);
+
+      const verb = event.type === 'add' ? 'added' : 'marked out';
+      showToast(`${event.name} ${verb} ✓`);
+      warnings.forEach(w => setTimeout(() => showToast(w), 50));
+
+      // Pause the clock at the new boundary; advance currentSegIdx to the
+      // first segment of the rebuilt remainder. Match handleSplitSegment's pattern.
+      const futureIdx = elapsedMinutes > 0 ? prevClock.currentSegIdx + 1 : prevClock.currentSegIdx;
+      return {
+        segmentStartTime: null,
+        accumulatedMs:    0,
+        currentSegIdx:    Math.min(futureIdx, newSegments.length - 1),
+        isRunning:        false,
+      };
+    });
+  }, [players, gkH1, gkH2, showToast]);
 
   // ── Manual player swap within a segment
   const handleSwap = useCallback((segIdx, swapAction) => {
@@ -612,6 +690,7 @@ export default function App() {
         onResetGame={resetGame}
         onSplitSegment={handleSplitSegment}
         onChangeGK={handleChangeGK}
+        onRosterChange={handleRosterChange}
         initialCurrentSeg={initialSegData.currentSeg}
         initialMatchStats={initialSegData.matchStats}
         onProgressUpdate={handleProgressUpdate}

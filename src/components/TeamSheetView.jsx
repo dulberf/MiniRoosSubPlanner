@@ -38,6 +38,7 @@ export default function TeamSheetView({
   gameClock = { isRunning: false, accumulatedMs: 0, currentSegIdx: null, segmentStartTime: null },
   onStartPeriod, onPausePeriod, onSplitSegment, onAdvanceSegment, onNudgeClock, onResetClock, onResetGame,
   onChangeGK,
+  onRosterChange,
   initialCurrentSeg = 0, initialMatchStats = {}, onProgressUpdate,
 }) {
   const [tab, setTab] = useState('field');
@@ -53,6 +54,13 @@ export default function TeamSheetView({
   const [honoursOpen, setHonoursOpen] = useState(false);
   const [confirmGK, setConfirmGK] = useState(null); // { name } when confirming a mid-game GK swap
   const [gkPickerOpen, setGkPickerOpen] = useState(false);
+
+  // Roster-change UI state
+  const [latePlayerOpen, setLatePlayerOpen] = useState(false);
+  const [latePlayerName, setLatePlayerName] = useState('');
+  const [playerOutOpen, setPlayerOutOpen] = useState(false);
+  const [playerOutName, setPlayerOutName] = useState('');
+  const [playerOutReplacement, setPlayerOutReplacement] = useState('');
 
   // FIX: Restore Save Modal State
   const [saveOpen, setSaveOpen] = useState(false);
@@ -84,7 +92,17 @@ export default function TeamSheetView({
   const [showClockMenu, setShowClockMenu] = useState(false);
 
   const seg = segments[currentSeg];
-  const benchSize = players.length - 9;
+  // Derive display counts from the current segment (not players.length) so a
+  // mid-game roster change (late arrival / injury) is reflected accurately.
+  const activeSquadSize = useMemo(() => {
+    const names = new Set();
+    if (seg) {
+      Object.values(seg.assignment).forEach(n => { if (n) names.add(n); });
+      seg.bench.forEach(n => { if (n) names.add(n); });
+    }
+    return names.size || players.length;
+  }, [seg, players.length]);
+  const benchSize = seg ? seg.bench.length : Math.max(0, players.length - 9);
   
   const { minutesMap, gkDutyMap, playerSchedule } = useMemo(() => calcStats(segments, players), [segments, players]);
   const minMins = Math.min(...Object.values(minutesMap));
@@ -340,7 +358,7 @@ export default function TeamSheetView({
       
       {/* ── 1. Top Glance Bar ── */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#fff', borderBottom: '3px solid #c7daf7' }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0f2d5a' }}>⚽ {players.length} Players | {benchSize} Bench</h1>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#0f2d5a' }}>⚽ {activeSquadSize} Players | {benchSize} Bench</h1>
         
         <div style={{ position: 'relative' }}>
           <button 
@@ -440,6 +458,21 @@ export default function TeamSheetView({
               <button onClick={() => setGkPickerOpen(true)} style={{ padding: 16, fontSize: 16, fontWeight: 800, background: '#fff7ed', color: '#b45309', border: '4px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
                 🧤 ALLOCATE GK
               </button>
+            )}
+
+            {!editMode && !isEffectivelyLocked && onRosterChange && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => { setLatePlayerName(''); setLatePlayerOpen(true); }}
+                  style={{ flex: 1, padding: 14, fontSize: 14, fontWeight: 800, background: '#ecfdf5', color: '#047857', border: '4px solid #059669', borderRadius: 12, cursor: 'pointer' }}>
+                  ➕ LATE PLAYER
+                </button>
+                <button
+                  onClick={() => { setPlayerOutName(''); setPlayerOutReplacement(''); setPlayerOutOpen(true); }}
+                  style={{ flex: 1, padding: 14, fontSize: 14, fontWeight: 800, background: '#fef2f2', color: '#b91c1c', border: '4px solid #dc2626', borderRadius: 12, cursor: 'pointer' }}>
+                  ➖ PLAYER OUT
+                </button>
+              </div>
             )}
 
             {!isEffectivelyLocked && (
@@ -561,6 +594,138 @@ export default function TeamSheetView({
           </div>
         </div>
       )}
+
+      {/* ── Late player: name input + confirm ── */}
+      {latePlayerOpen && (() => {
+        const trimmed = latePlayerName.trim();
+        // Compare against the ACTIVE squad (segment-derived), not players —
+        // a previously-removed name is allowed to come back as a new arrival.
+        const activeNames = new Set();
+        Object.values(seg.assignment).forEach(n => { if (n) activeNames.add(n); });
+        seg.bench.forEach(n => { if (n) activeNames.add(n); });
+        const dup = activeNames.has(trimmed);
+        const tooMany = activeSquadSize >= 12;
+        const valid = trimmed.length > 0 && !dup && !tooMany;
+        const elapsedMins = Math.floor(elapsedMs / 60000);
+        const elapsedSecs = Math.floor((elapsedMs % 60000) / 1000);
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 250, padding: 20 }}>
+            <div style={{ background: '#fff', padding: 28, borderRadius: 24, width: '100%', maxWidth: 440, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+              <h2 style={{ fontSize: 22, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 6 }}>➕ Late Player</h2>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#4a6b8a', marginBottom: 18, lineHeight: 1.4 }}>
+                Add a player to the squad. The schedule will be replanned from the current clock time. They get equal share of the remaining game — no catch-up.
+              </div>
+              <input
+                value={latePlayerName}
+                onChange={e => setLatePlayerName(e.target.value)}
+                placeholder="Player name"
+                autoFocus
+                style={{ width: '100%', padding: 14, borderRadius: 12, border: '3px solid #cbd5e1', fontSize: 16, fontWeight: 700, color: '#0f2d5a', boxSizing: 'border-box', outline: 'none' }}
+              />
+              {trimmed && (
+                <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 10, background: dup ? '#fef2f2' : tooMany ? '#fef2f2' : '#ecfdf5', border: `2px solid ${dup || tooMany ? '#dc2626' : '#059669'}`, fontSize: 13, fontWeight: 700, color: dup || tooMany ? '#b91c1c' : '#047857' }}>
+                  {dup
+                    ? `${trimmed} is already in the squad.`
+                    : tooMany
+                      ? `Maximum is 12 players (already at ${activeSquadSize}).`
+                      : `Squad will go from ${activeSquadSize} → ${activeSquadSize + 1}. Splitting at ${elapsedMins}:${String(elapsedSecs).padStart(2, '0')}.`}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+                <button onClick={() => setLatePlayerOpen(false)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+                <button
+                  disabled={!valid}
+                  onClick={() => {
+                    onRosterChange?.({ type: 'add', name: trimmed });
+                    setLatePlayerOpen(false);
+                  }}
+                  style={{ flex: 2, padding: 16, background: valid ? '#059669' : '#94a3b8', border: 'none', borderRadius: 12, color: '#fff', fontSize: 15, fontWeight: 900, cursor: valid ? 'pointer' : 'not-allowed' }}>
+                  ➕ Add Player
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Player out: pick player (and replacement if on field) + confirm ── */}
+      {playerOutOpen && (() => {
+        const onField = playerOutName && Object.values(seg.assignment).includes(playerOutName);
+        const isCurrentGK = playerOutName && seg.assignment.GK === playerOutName;
+        // Active squad = current segment's field + bench (excludes anyone
+        // already removed by an earlier injury). The player dropdown should
+        // only offer active players.
+        const activeNamesOut = new Set();
+        Object.values(seg.assignment).forEach(n => { if (n) activeNamesOut.add(n); });
+        seg.bench.forEach(n => { if (n) activeNamesOut.add(n); });
+        const activePlayerList = players.filter(p => activeNamesOut.has(p));
+        const wouldDropBelowSix = activeSquadSize - 1 < 6;
+        const benchOptions = seg.bench;
+        const elapsedMins = Math.floor(elapsedMs / 60000);
+        const elapsedSecs = Math.floor((elapsedMs % 60000) / 1000);
+        const valid = playerOutName && !isCurrentGK && !wouldDropBelowSix && (!onField || benchOptions.length > 0 || activeSquadSize - 1 < 9);
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 250, padding: 20 }}>
+            <div style={{ background: '#fff', padding: 28, borderRadius: 24, width: '100%', maxWidth: 440, maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+              <h2 style={{ fontSize: 22, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 6 }}>➖ Player Out</h2>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#4a6b8a', marginBottom: 18, lineHeight: 1.4 }}>
+                Remove a player from the rest of the game (e.g. injury). Their minutes already played are kept. The schedule will be replanned for the remainder.
+              </div>
+
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#4a6b8a', marginBottom: 6, letterSpacing: 1 }}>PLAYER LEAVING</label>
+              <select
+                value={playerOutName}
+                onChange={e => { setPlayerOutName(e.target.value); setPlayerOutReplacement(''); }}
+                style={{ width: '100%', padding: 14, borderRadius: 12, border: '3px solid #cbd5e1', fontSize: 16, fontWeight: 700, color: '#0f2d5a', background: '#fff', boxSizing: 'border-box', outline: 'none', cursor: 'pointer' }}>
+                <option value="">— Select Player —</option>
+                {activePlayerList.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+
+              {onField && benchOptions.length > 0 && (
+                <>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#4a6b8a', marginTop: 16, marginBottom: 6, letterSpacing: 1 }}>WHO COMES ON?</label>
+                  <select
+                    value={playerOutReplacement}
+                    onChange={e => setPlayerOutReplacement(e.target.value)}
+                    style={{ width: '100%', padding: 14, borderRadius: 12, border: '3px solid #cbd5e1', fontSize: 16, fontWeight: 700, color: '#0f2d5a', background: '#fff', boxSizing: 'border-box', outline: 'none', cursor: 'pointer' }}>
+                    <option value="">— Pick most-rested —</option>
+                    {benchOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </>
+              )}
+
+              {playerOutName && (
+                <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 10, background: !valid ? '#fef2f2' : '#fffbeb', border: `2px solid ${!valid ? '#dc2626' : '#f59e0b'}`, fontSize: 13, fontWeight: 700, color: !valid ? '#b91c1c' : '#b45309' }}>
+                  {isCurrentGK
+                    ? 'This player is the current goalkeeper. Use ALLOCATE GK first to swap goalkeeper, then mark them out.'
+                    : wouldDropBelowSix
+                      ? `Cannot drop below 6 players (currently ${activeSquadSize}).`
+                      : onField && benchOptions.length === 0 && activeSquadSize - 1 >= 9
+                        ? 'No bench players available to swap on.'
+                        : `Squad will go from ${activeSquadSize} → ${activeSquadSize - 1}. Splitting at ${elapsedMins}:${String(elapsedSecs).padStart(2, '0')}. ${onField ? `${playerOutReplacement || '(most-rested bench player)'} comes on.` : `${playerOutName} was on the bench.`}`}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+                <button onClick={() => setPlayerOutOpen(false)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+                <button
+                  disabled={!valid}
+                  onClick={() => {
+                    onRosterChange?.({
+                      type: 'remove',
+                      name: playerOutName,
+                      replacementOnField: playerOutReplacement || undefined,
+                    });
+                    setPlayerOutOpen(false);
+                  }}
+                  style={{ flex: 2, padding: 16, background: valid ? '#dc2626' : '#94a3b8', border: 'none', borderRadius: 12, color: '#fff', fontSize: 15, fontWeight: 900, cursor: valid ? 'pointer' : 'not-allowed' }}>
+                  ➖ Mark Out
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Honours sheet ── */}
       {honoursOpen && (() => {
