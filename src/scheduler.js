@@ -11,6 +11,20 @@
 import { OUTFIELD } from './constants.js';
 
 // ---------------------------------------------------------------------------
+// Position shuffler — randomises which kid gets which outfield slot so the
+// same input order doesn't produce the same lineup every game. Fisher-Yates.
+// ---------------------------------------------------------------------------
+
+function shuffled(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ---------------------------------------------------------------------------
 // Segment configuration
 // ---------------------------------------------------------------------------
 
@@ -270,19 +284,16 @@ export function buildSchedule(players, options = false) {
 
   // ── 9-player special case: no bench, two halves ──────────────────────────
   if (benchSize <= 0) {
+    // H1: shuffle the 8 non-GK kids across the outfield
+    const h1Outfield = shuffled(players.slice(1).filter(Boolean));
     const h1Assignment = { GK: players[0] };
-    OUTFIELD.forEach((pos, i) => { h1Assignment[pos] = players[i + 1] ?? null; });
+    OUTFIELD.forEach((pos, i) => { h1Assignment[pos] = h1Outfield[i] ?? null; });
 
     const h2GK = lockGKFullGame ? players[0] : players[1];
+    // H2: shuffle the 8 non-(H2-GK) kids — independent reshuffle at half-time
+    const h2Outfield = shuffled(players.filter(p => p && p !== h2GK));
     const h2Assignment = { GK: h2GK };
-    if (lockGKFullGame) {
-      OUTFIELD.forEach((pos, i) => { h2Assignment[pos] = players[i + 1] ?? null; });
-    } else {
-      // players[1] becomes GK; players[0] steps into OUTFIELD[0] (players[1]'s H1 spot)
-      OUTFIELD.forEach((pos, i) => {
-        h2Assignment[pos] = i === 0 ? players[0] : (players[i + 1] ?? null);
-      });
-    }
+    OUTFIELD.forEach((pos, i) => { h2Assignment[pos] = h2Outfield[i] ?? null; });
 
     return [
       {
@@ -320,7 +331,8 @@ export function buildSchedule(players, options = false) {
   const bench0  = new Set(segBench[0]);
   const field0  = Array.from({ length: n }, (_, i) => i).filter(i => !bench0.has(i));
   const gk0     = gkPerSeg[0];
-  const out0    = field0.filter(i => i !== gk0);
+  // Shuffle so input order doesn't dictate which kid gets which outfield slot
+  const out0    = shuffled(field0.filter(i => i !== gk0));
 
   // posMap: position name → player *index* (so we can track as subs happen)
   let posMap = { GK: gk0 };

@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-05-09 (Session 8 complete)*
+*Last updated: 2026-05-10 (Session 9 complete)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -208,6 +208,27 @@ Dedup key: `date + JSON.stringify(players) + label`.
 - `buildSchedule` API: `(players, lockGKBoolean)` → `(players, { gkH1, gkH2 })`
 - `suggestGKs` deleted — oracle is single source of truth
 - `changeGKFromSegment` helper added
+
+---
+
+### Session 9 — Position shuffle on Generate ✅
+**Bug:** Outfield positions were assigned in player-array order. With the same input order each week (and same GKs), the same kid always got LB, the next CB, etc. `orderPlayersForGame` only rotated for GK/bench fairness — it didn't touch positional fairness.
+
+**Fix:** Single Fisher-Yates `shuffled()` helper at the top of `src/scheduler.js`. Applied at three points:
+- Standard rotation path (10–12 players): `out0` (the segment-0 non-GK, non-bench indices) is shuffled before the OUTFIELD assignment. The carry-forward `lastOutfieldPos` logic propagates the new positions through subsequent segments naturally.
+- 9-player H1: shuffle the 8 non-GK names → assign to OUTFIELD.
+- 9-player H2: independent shuffle of the 8 non-(H2-GK) names. The previous "minimal disruption" rule (H1 GK takes H2 GK's spot, others stay put) was dropped at the coach's request — full reshuffle at half-time.
+
+**Behaviour:** Every press of `BALANCE & GENERATE` produces a different lineup. Coach can re-press to re-roll. GKs stay stable (the picker drives those). Bench rotation, position-continuity-on-sub-return, and `replan.js` are all unchanged.
+
+**Verified in dev preview:**
+- 12-player: 8/8 unique H1 lineups, 8/8 unique H2 lineups across 8 consecutive `buildSchedule` calls
+- 9-player: 8/8 unique H1, 8/8 unique H2, H1 always ≠ H2
+- GK assignment unchanged (still respects gkH1 / gkH2 picker)
+- All 12 players accounted for in every run (no drops, no duplicates)
+- End-to-end UI renders shuffled lineup correctly (e.g. LB=Gen, CB=Grace instead of alphabetical Cara, Clara)
+
+**Files touched:** `src/scheduler.js` only (~14 lines added).
 
 ---
 
