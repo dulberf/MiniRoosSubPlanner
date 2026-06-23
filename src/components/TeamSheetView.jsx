@@ -62,6 +62,13 @@ export default function TeamSheetView({
   const [playerOutName, setPlayerOutName] = useState('');
   const [playerOutReplacement, setPlayerOutReplacement] = useState('');
 
+  // Emergency mid-period sub: when the clock isn't timing this period we ask how
+  // many minutes have been played, so the past stays locked and only the rest of
+  // the period changes. Without this the edit silently rewrote the whole period
+  // (the weekend bug that left one player on 25m and another on the full 50m).
+  const [subPrompt, setSubPrompt] = useState(null); // truthy when the prompt is open
+  const [subPromptMins, setSubPromptMins] = useState('');
+
   // FIX: Restore Save Modal State
   const [saveOpen, setSaveOpen] = useState(false);
   const [matchLabel, setMatchLabel] = useState('');
@@ -338,15 +345,38 @@ export default function TeamSheetView({
   const handleEmergencySub = () => {
     if (!onSplitSegment) return setEditMode(true);
     const elapsedMinsForSplit = Math.floor(elapsedMs / 60000);
+    // Fast path: the clock is actively timing THIS period — split at the live time.
     if (gameClock.isRunning && gameClock.currentSegIdx === currentSeg && elapsedMinsForSplit > 0) {
       const futureSegIdx = onSplitSegment(currentSeg, elapsedMinsForSplit);
-      if (futureSegIdx !== undefined) {
+      if (futureSegIdx != null) {
         setCurrentSeg(futureSegIdx);
         setEditMode(true);
       }
-    } else {
+      return;
+    }
+    // Clock isn't timing this period (paused, not started, or we scrolled to it).
+    // Ask how far in we are instead of silently rewriting the whole period.
+    const guess = elapsedMinsForSplit > 0 && elapsedMinsForSplit < seg.duration ? elapsedMinsForSplit : '';
+    setSubPromptMins(String(guess));
+    setSubPrompt(true);
+  };
+
+  // Coach gave a split time: lock the played part, edit only the rest.
+  const confirmSubFromTime = () => {
+    const mins = parseInt(subPromptMins, 10);
+    if (!Number.isFinite(mins) || mins < 1 || mins > seg.duration - 1) return;
+    const futureSegIdx = onSplitSegment(currentSeg, mins);
+    setSubPrompt(false);
+    if (futureSegIdx != null) {
+      setCurrentSeg(futureSegIdx);
       setEditMode(true);
     }
+  };
+
+  // Coach chose to change the whole period (only sensible before it starts).
+  const editWholePeriod = () => {
+    setSubPrompt(false);
+    setEditMode(true);
   };
 
   const isKidsView = orientation !== 'vertical';
@@ -477,7 +507,7 @@ export default function TeamSheetView({
 
             {!isEffectivelyLocked && (
               <button onClick={editMode ? () => setEditMode(false) : handleEmergencySub} style={{ padding: 20, fontSize: 18, fontWeight: 900, background: editMode ? '#1d6fcf' : '#059669', color: '#fff', border: `4px solid ${editMode ? '#1558b0' : '#047857'}`, borderRadius: 12, cursor: 'pointer' }}>
-                {editMode ? '✅ FINISH EDITING' : (gameClock.isRunning && gameClock.currentSegIdx === currentSeg ? '🚨 EMERGENCY MID-PERIOD SUB' : '🔄 EDIT LINEUP')}
+                {editMode ? '✅ FINISH EDITING' : (gameClock.isRunning && gameClock.currentSegIdx === currentSeg ? '🚨 EMERGENCY MID-PERIOD SUB' : '🔄 EDIT LINEUP / SUB')}
               </button>
             )}
             {isEffectivelyLocked && (
@@ -594,6 +624,54 @@ export default function TeamSheetView({
           </div>
         </div>
       )}
+
+      {/* ── Emergency sub: ask the split time when the clock isn't timing this period ── */}
+      {subPrompt && (() => {
+        const mins  = parseInt(subPromptMins, 10);
+        const canSplit = seg.duration >= 2;
+        const valid = canSplit && Number.isFinite(mins) && mins >= 1 && mins <= seg.duration - 1;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 250, padding: 20 }}>
+            <div style={{ background: '#fff', padding: 28, borderRadius: 24, width: '100%', maxWidth: 440, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+              <h2 style={{ fontSize: 22, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 6 }}>🔁 Make a Substitution</h2>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#4a6b8a', marginBottom: 18, lineHeight: 1.4 }}>
+                The clock isn't timing this period, so I don't know how far in we are. Enter the minutes already played and I'll <strong style={{ color: '#0f2d5a' }}>lock everything before the sub</strong> — only the rest of the period changes.
+              </div>
+              {canSplit && (
+                <>
+                  <label style={{ fontSize: 13, fontWeight: 800, color: '#0f2d5a', display: 'block', marginBottom: 6 }}>
+                    Minutes played this period (1–{seg.duration - 1})
+                  </label>
+                  <input
+                    type="number" min={1} max={seg.duration - 1} value={subPromptMins} autoFocus
+                    onChange={e => setSubPromptMins(e.target.value)}
+                    style={{ width: '100%', padding: 14, borderRadius: 12, border: '3px solid #cbd5e1', fontSize: 18, fontWeight: 800, color: '#0f2d5a', boxSizing: 'border-box', outline: 'none' }}
+                  />
+                  <button
+                    disabled={!valid}
+                    onClick={confirmSubFromTime}
+                    style={{ width: '100%', marginTop: 16, padding: 16, fontSize: 16, fontWeight: 900, background: valid ? '#059669' : '#94a3b8', color: '#fff', border: 'none', borderRadius: 12, cursor: valid ? 'pointer' : 'default' }}>
+                    ✂️ Sub from {valid ? mins : '…'} min — lock the past
+                  </button>
+                </>
+              )}
+              <button
+                onClick={editWholePeriod}
+                style={{ width: '100%', marginTop: 10, padding: 14, fontSize: 14, fontWeight: 800, background: '#fff7ed', color: '#b45309', border: '3px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
+                ⚠️ Change the whole period instead
+              </button>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#b45309', marginTop: 6, lineHeight: 1.4 }}>
+                "Whole period" rewrites who's on for all {seg.duration} minutes — only use it before this period has started.
+              </div>
+              <button
+                onClick={() => setSubPrompt(false)}
+                style={{ width: '100%', marginTop: 12, padding: 12, fontSize: 14, fontWeight: 800, background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 12, cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Late player: name input + confirm ── */}
       {latePlayerOpen && (() => {

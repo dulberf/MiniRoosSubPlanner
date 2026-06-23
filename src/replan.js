@@ -89,24 +89,51 @@ function distributeEvenly(nSegs, targetMin) {
 
 /**
  * Scale a standard duration template to fit targetMin total minutes.
- * Rounds each entry; absorbs rounding error in the last segment. Falls back
- * to even distribution if rounding produces a non-positive last segment.
+ *
+ * Guarantees every returned segment is >= 1 minute and that they sum to exactly
+ * targetMin. When there are fewer minutes than template segments the segment
+ * count is reduced so none collapse to zero — the bug behind the weekend
+ * mis-rotation, where a short remainder produced 0- and negative-minute
+ * segments. Proportions follow the template via the largest-remainder method.
  */
 function scaleTemplate(template, targetMin) {
   if (!template || template.length === 0 || targetMin <= 0) return [];
-  if (template.length === 1) return [targetMin];
 
-  const sum = template.reduce((a, b) => a + b, 0);
-  if (sum === targetMin) return [...template];
+  // Never create more segments than there are whole minutes to fill them.
+  const nSegs = Math.min(template.length, targetMin);
+  if (nSegs <= 1) return [targetMin];
 
-  const scaled = template.map(d => Math.max(1, Math.round((d * targetMin) / sum)));
-  const scaledSum = scaled.reduce((a, b) => a + b, 0);
-  scaled[scaled.length - 1] += targetMin - scaledSum;
+  const slice    = template.slice(0, nSegs);
+  const sliceSum = slice.reduce((a, b) => a + b, 0);
+  if (sliceSum === targetMin) return [...slice];
 
-  if (scaled[scaled.length - 1] <= 0) {
-    return distributeEvenly(template.length, targetMin);
+  // Ideal real share per segment, floored (min 1); hand the leftover minutes to
+  // the largest fractional parts (largest-remainder / Hamilton apportionment).
+  const ideal   = slice.map(d => (d * targetMin) / sliceSum);
+  const result  = ideal.map(v => Math.max(1, Math.floor(v)));
+  let remaining = targetMin - result.reduce((a, b) => a + b, 0);
+
+  if (remaining > 0) {
+    const order = ideal
+      .map((v, idx) => ({ idx, frac: v - Math.floor(v) }))
+      .sort((a, b) => b.frac - a.frac);
+    for (let k = 0; remaining > 0; k++) { result[order[k % nSegs].idx]++; remaining--; }
+  } else if (remaining < 0) {
+    // Over-allocated by the min-1 floors — trim from the largest segments first.
+    const order = result
+      .map((v, idx) => ({ idx, v }))
+      .sort((a, b) => b.v - a.v);
+    for (let k = 0; remaining < 0 && k < nSegs * targetMin; k++) {
+      const t = order[k % nSegs];
+      if (result[t.idx] > 1) { result[t.idx]--; remaining++; }
+    }
   }
-  return scaled;
+
+  // Final safety net: anything still off falls back to an even split.
+  if (result.some(d => d < 1) || result.reduce((a, b) => a + b, 0) !== targetMin) {
+    return distributeEvenly(nSegs, targetMin);
+  }
+  return result;
 }
 
 /**

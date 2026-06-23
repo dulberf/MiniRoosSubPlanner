@@ -488,36 +488,45 @@ export default function App() {
    * Returns the index of the new "future" segment (B) so the UI can
    * immediately offer the swap interface on it.
    */
-  const handleSplitSegment = useCallback(() => {
-    let futureSegIdx = null;
+  // explicitSegIdx / explicitElapsedMins let the caller drive the split when the
+  // clock isn't timing the period (the emergency-sub time prompt). When omitted
+  // the split point is derived from the live clock as before. Computed
+  // synchronously off segmentsRef so the returned futureSegIdx is reliable.
+  const handleSplitSegment = useCallback((explicitSegIdx = null, explicitElapsedMins = null) => {
+    const segs = segmentsRef.current;
+    if (!segs) return null;
 
-    setGameClock(prev => {
-      if (prev.currentSegIdx === null) return prev;
+    const segIdx = explicitSegIdx != null ? explicitSegIdx : gameClock.currentSegIdx;
+    if (segIdx == null || !segs[segIdx]) return null;
 
-      const elapsedMs = prev.accumulatedMs +
-        (prev.isRunning && prev.segmentStartTime ? Date.now() - prev.segmentStartTime : 0);
-      const elapsedMinutes = Math.max(1, Math.round(elapsedMs / 60000));
+    const seg = segs[segIdx];
+    if (seg.duration < 2) return null; // too short to split
 
-      setSegments(prevSegs => {
-        const seg = prevSegs[prev.currentSegIdx];
-        const clamped = Math.min(elapsedMinutes, seg.duration - 1);
-        const newSegs = splitSegment(prevSegs, prev.currentSegIdx, clamped);
-        futureSegIdx = prev.currentSegIdx + 1;
-        return newSegs;
-      });
-      setIsSaved(false);
+    let mins;
+    if (explicitElapsedMins != null) {
+      mins = Math.round(explicitElapsedMins);
+    } else {
+      const elapsedMs = gameClock.accumulatedMs +
+        (gameClock.isRunning && gameClock.segmentStartTime ? Date.now() - gameClock.segmentStartTime : 0);
+      mins = Math.round(elapsedMs / 60000);
+    }
+    const clamped = Math.min(Math.max(1, mins), seg.duration - 1);
 
-      // Pause the clock and point to the new "future" segment
-      return {
-        segmentStartTime: null,
-        accumulatedMs:    0,
-        currentSegIdx:    prev.currentSegIdx + 1,
-        isRunning:        false,
-      };
+    const newSegs = splitSegment(segs, segIdx, clamped);
+    const futureSegIdx = segIdx + 1;
+
+    setSegments(newSegs);
+    setIsSaved(false);
+    // Pause the clock and point to the new "future" segment
+    setGameClock({
+      segmentStartTime: null,
+      accumulatedMs:    0,
+      currentSegIdx:    futureSegIdx,
+      isRunning:        false,
     });
 
     return futureSegIdx;
-  }, []);
+  }, [gameClock]);
 
   // ── Save game to season
   const handleSave = useCallback(({ label, goals, assists, potm, captain, ourScore, oppositionScore, notes }) => {

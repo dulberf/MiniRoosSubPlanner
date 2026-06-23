@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-05-10 (Session 9 complete)*
+*Last updated: 2026-06-22 (Session 10 complete)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -164,6 +164,22 @@ Dedup key: `date + JSON.stringify(players) + label`.
 
 ## Session History
 
+### Session 10 — Emergency-sub time anchor + replan duration fix ✅
+**Bug (the weekend, Round 8 Terrigal 20/6):** A 12-player game came out with Ivy on the full 50 min and Cara on only 25. Diagnosed from the season export.
+
+**Root cause:** `handleEmergencySub` (TeamSheetView) only split the live period when `gameClock.isRunning && currentSegIdx === currentSeg && elapsed > 0`. With the clock **paused** (coach hadn't restarted it for H2), it silently fell through to `setEditMode(true)` — so the substitution was applied to the **entire** period instead of from the sub moment. The H1 keeper's H2 rest was lost (played 50) and an already-rested player was benched again (dropped to 25). H1 and all "historical" segments were actually intact — the damage was confined to the un-split period. Reproduced deterministically: same sub, clock-running split → spread 10; clock-stopped whole-period → spread 20.
+
+**Fixes:**
+- **Emergency sub is now always time-anchored.** Clock-running fast path unchanged. When the clock isn't timing the period, a new modal asks "minutes played this period" and splits at that point (locking the past). A clearly-warned "Change the whole period instead" escape preserves the old behaviour for pre-period plan edits. No more silent whole-period edits. (`TeamSheetView.jsx`: `subPrompt`/`subPromptMins` state, `confirmSubFromTime`, `editWholePeriod`, new modal; button label → `EDIT LINEUP / SUB`.)
+- **`handleSplitSegment` (App.jsx) refactored** to accept `(explicitSegIdx, explicitElapsedMins)` and compute synchronously off `segmentsRef` so the returned `futureSegIdx` is reliable. Clock-derived fallback preserved when called with no args.
+- **`scaleTemplate` (replan.js) no longer emits 0-/negative-minute segments.** On a short remainder it now caps the segment count at the available minutes and apportions via largest-remainder (Hamilton). Affects LATE PLAYER / PLAYER OUT.
+
+**Tests:** `test/emergency-sub.test.mjs` (run `npm test` → `node --test`). Asserts the time-anchored sub locks the past + keeps spread ≤ 10, documents the whole-period spread ≥ 20, and that replan never produces sub-1-minute segments and still totals 50.
+
+**Files touched:** `src/components/TeamSheetView.jsx`, `src/App.jsx`, `src/replan.js`, `package.json` (test script), `test/emergency-sub.test.mjs` (new), `team-sheet-offline.html` (rebuilt).
+
+**Deferred to next session:** Clock display shows the wrong time until START is pressed, then jumps in the first 1–2s before settling. Suspected: the live `now` value only refreshes on the timer tick, so the first render after START is briefly stale. Separate subsystem — not folded into this fix. See Watch List.
+
 ### Session 1 — Persistence hardening ✅
 - Debounced save (3s) on every `matchStats` change in `TeamSheetView`
 - Flush on `visibilitychange` (primary iPad path) and `beforeunload` (desktop fallback)
@@ -298,6 +314,7 @@ Dedup key: `date + JSON.stringify(players) + label`.
 - **`visibilitychange` is primary save trigger on iOS** — `beforeunload` alone is unreliable on iPad and must never be the sole flush mechanism.
 - **Safari ITP** clears localStorage after 7 days of non-use. Export/Import buttons on Setup and Season screens are the safety net — do not remove them.
 - **12-player bench is inherently unequal** — 10min and 15min slots. Season fairness corrects over multiple games.
+- **Clock display jump on START (open, Session 10):** the readout shows the wrong time until START is pressed, then jumps in the first 1–2 seconds before settling on the correct countdown. Likely the live `now` state only updates on the interval tick, so the first post-START render is stale. Needs a dedicated look — does not affect minutes/scheduling.
 
 ---
 
