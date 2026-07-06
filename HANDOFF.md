@@ -69,11 +69,11 @@ All row gaps are uniform at 23% so the sub label below each token never overlaps
 | Position | Background | Text |
 |----------|-----------|------|
 | GK | Magenta `#d946ef` | Dark navy `#0f2d5a` |
-| LB, LM, LF | White `#ffffff` | Dark `#0f172a` |
-| CB, CM | Light grey `#b0bec5` | Dark `#0f172a` |
-| RB, RM, RF | **Black `#111827`** | White `#ffffff` |
+| LB, LM, LF | **Black `#111827`** | White `#ffffff` |
+| CB, CM | Light grey `#b0bec5` | Dark `#111827` |
+| RB, RM, RF | White `#ffffff` | Dark `#111827` |
 
-> ⚠️ RB/RM/RF are BLACK. `CLAUDE_CODE_HANDOFF.md` incorrectly described them as light grey — do not change them.
+> Mnemonic (from `src/constants.js`): **"White Rhymes with Right"** — Right-side positions are WHITE, Left-side are BLACK. This table previously had the two swapped; `src/constants.js` is the source of truth and matches what's on the field. Do not "fix" the code to match old docs.
 
 ### Token sizing (`src/components/FieldView.jsx`)
 Token size calculated from field container width via ResizeObserver (not `window.innerWidth`):
@@ -163,6 +163,33 @@ Dedup key: `date + JSON.stringify(players) + label`.
 ---
 
 ## Session History
+
+### Session 12 — Audit cleanup: invariant guards, escape-hatch guard, code health, clock jump ✅
+**Scope:** ISSUES.md Issues 4–6 plus the Session-10 clock watch-list item. No behaviour changes to the core rotation beyond one algorithm improvement found by the new tests (below).
+
+**Issue 4 — lineup integrity guards:**
+- `findLineupIssue(segments)` and `findMembershipDrift(before, after)` exported from `scheduler.js`.
+- All mutation paths now compute their result synchronously (off `segmentsRef`) and validate BEFORE committing: `handleSwap` (edited segment only — forward propagation is transient by design and healed by the FINISH-EDITING rebalance), `handleChangeGK`, `handleRosterChange`, `handleRebalance`. On violation: red toast + console.warn, state not committed.
+
+**Issue 5 — whole-period escape hatch guarded:**
+- In the emergency-sub prompt, "Change the whole period instead" is disabled once the current period has any elapsed time (`gameClock.currentSegIdx === currentSeg && elapsedMs > 0`), with explanatory copy. Pre-period plan edits unaffected.
+
+**Issue 6 — code health:**
+- `handleRosterChange` no longer runs the replan/toasts inside the `setGameClock` updater (pure-updater contract; StrictMode double-fire). Elapsed minutes now `Math.floor` everywhere (was `round` in two places) — never lock unplayed time.
+- `MIN_PLAYERS = 7` / `MAX_PLAYERS = 12` exported from `constants.js`, used by InputView + App. `replan.js` keeps its in-game floor of 6 deliberately (injuries must be recordable below the pre-game minimum) — commented.
+- Dead `onReorder` prop removed from TeamSheetView.
+- `_app_raw.js` (legacy pre-Vite artifact) deleted.
+- Colour table in this file corrected — it had LB/LM/LF and RB/RM/RF swapped vs `constants.js` ("White Rhymes with Right").
+
+**Clock jump on START (Session 10 watch list) — fixed:**
+- Cause: first render after START used a stale `now` (only refreshed on the interval tick), so `now − segmentStartTime` was a large negative and the readout jumped for 1–2 s.
+- Fix: the tick effect calls `setNow(Date.now())` immediately on any run-state change, and `elapsedMs` clamps the delta with `Math.max(0, …)`.
+
+**Algorithm improvement (caught by new tests run repeatedly):** `rebalanceRemainder` now has a forced-rest lookahead — a player who keeps goal for every remaining segment (the incoming H2 GK during the last H1 segment) can only rest NOW, so an unrested one is benched ahead of the minutes ranking. Mirrors `buildSchedule`'s rest-the-H2-GK-before-HT rule. Without it, an H1 edit could strand the H2 GK on 50 min.
+
+**Tests:** `test/integrity.test.mjs` (new, 3 tests) + hardened `rebalance.test.mjs` (H1-edit case now asserts everyone rests exactly once, spread ≤ 10; late-edit case made deterministic). 12 tests, verified stable across 10 consecutive runs (the position shuffle makes naive scenarios flaky — pick swap targets by rest-history, not position).
+
+**Files touched:** `src/scheduler.js`, `src/replan.js`, `src/App.jsx`, `src/components/TeamSheetView.jsx`, `src/components/InputView.jsx`, `src/constants.js`, `test/integrity.test.mjs` (new), `test/rebalance.test.mjs`, `_app_raw.js` (deleted), `ISSUES.md`, `team-sheet-offline.html` (rebuilt).
 
 ### Session 11 — Rebalance after manual edits + fairness-oracle fix + stable game ids ✅
 **Context:** Full audit (see `ISSUES.md`) diagnosed the coach's "app subs kids off a 2nd time" report. Season data showed every edited game had double-benched players (worst: Gwandelen r8 4/7 — Grace & Gen 20 min while three players played the full 50).
@@ -340,7 +367,7 @@ Dedup key: `date + JSON.stringify(players) + label`.
 - **`visibilitychange` is primary save trigger on iOS** — `beforeunload` alone is unreliable on iPad and must never be the sole flush mechanism.
 - **Safari ITP** clears localStorage after 7 days of non-use. Export/Import buttons on Setup and Season screens are the safety net — do not remove them.
 - **12-player bench is inherently unequal** — 10min and 15min slots. Season fairness corrects over multiple games.
-- **Clock display jump on START (open, Session 10):** the readout shows the wrong time until START is pressed, then jumps in the first 1–2 seconds before settling on the correct countdown. Likely the live `now` state only updates on the interval tick, so the first post-START render is stale. Needs a dedicated look — does not affect minutes/scheduling.
+- ~~Clock display jump on START~~ **fixed in Session 12** (stale `now` on the first post-START render; resync + clamp).
 
 ---
 

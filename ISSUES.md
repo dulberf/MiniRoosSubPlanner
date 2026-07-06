@@ -8,7 +8,7 @@
 
 ---
 
-> **STATUS (Session 11, 6/7/2026): Issues 1, 2 and 3 are IMPLEMENTED** — see HANDOFF.md Session 11 for details. Issues 4–6 remain open. The duplicate 4/7 game still needs to be deleted manually in the Season view on the iPad.
+> **STATUS: ALL ISSUES IMPLEMENTED.** Issues 1–3 in Session 11, Issues 4–6 plus the clock-jump watch-list item in Session 12 (both 6/7/2026) — see HANDOFF.md for details. The duplicate 4/7 game was removed via the corrected season export and re-import. This file is retained as the audit record.
 
 ## Issue 1 — CRITICAL: Manual bench moves don't rebalance the future rotation ✅ FIXED (Session 11)
 
@@ -128,7 +128,7 @@ Every season stat (goals, minutes, GK stints, bench time, honours) is double-cou
 
 ---
 
-## Issue 4 — MEDIUM: Propagation can silently drop or strand players
+## Issue 4 — MEDIUM: Propagation can silently drop or strand players ✅ FIXED (Session 12)
 
 In `handleSwap`'s loop, incoming players are only slotted while vacated positions remain (`if (vacatedPositions[idx] !== undefined)`). With mismatched counts a player can vanish from both field and bench, or the field runs short — silently.
 
@@ -142,7 +142,7 @@ On violation: red toast + console.warn, don't commit the corrupt state. Cheap in
 
 ---
 
-## Issue 5 — MEDIUM: "Change the whole period instead" still rewrites live history
+## Issue 5 — MEDIUM: "Change the whole period instead" still rewrites live history ✅ FIXED (Session 12)
 
 Session 10 gated emergency subs behind the time prompt, but the escape hatch in the sub-prompt modal (`editWholePeriod` in `TeamSheetView.jsx`) is one tap away with no guard. If the period is actually underway, it rewrites minutes already played — the exact Round-8 Terrigal bug class.
 
@@ -150,7 +150,7 @@ Session 10 gated emergency subs behind the time prompt, but the escape hatch in 
 
 ---
 
-## Issue 6 — LOW: Code-health items
+## Issue 6 — LOW: Code-health items ✅ FIXED (Session 12, incl. the clock-jump watch-list item)
 
 1. **Side effects inside a state updater.** `handleRosterChange` (`App.jsx` ~223–294) runs the whole replan plus `setSegments` / `setPlayersText` / toasts *inside* the `setGameClock` updater. Updaters must be pure — StrictMode dev double-invokes them. Restructure: compute clock + replan results outside, then set states.
 2. **Min-squad inconsistency.** InputView requires 7 (`MIN_PLAYERS = 7`), `handleGenerate` allows 6, `replan.js` `MIN_SQUAD = 6`. Pick one, export `MIN_SQUAD` from `constants.js`, use everywhere.

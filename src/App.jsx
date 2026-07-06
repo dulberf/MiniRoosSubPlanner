@@ -8,9 +8,9 @@ import InputView      from './components/InputView.jsx';
 import TeamSheetView  from './components/TeamSheetView.jsx';
 import SeasonView     from './components/SeasonView.jsx';
 
-import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment, changeGKFromSegment, getSecondGKSlot } from './scheduler.js';
+import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment, changeGKFromSegment, getSecondGKSlot, findLineupIssue, findMembershipDrift } from './scheduler.js';
 import { replanFromRosterChange, rebalanceRemainder } from './replan.js';
-import { STORAGE_KEY, IN_PROGRESS_KEY, DEFAULT_PLAYERS } from './constants.js';
+import { STORAGE_KEY, IN_PROGRESS_KEY, DEFAULT_PLAYERS, MIN_PLAYERS, MAX_PLAYERS } from './constants.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -128,7 +128,7 @@ export default function App() {
   // (when the oracle's H2 slot would collide with a preserved H1, fall back to
   // the oracle's H1 slot — guaranteed to be a different player).
   useEffect(() => {
-    if (players.length < 6 || players.length > 12) return;
+    if (players.length < MIN_PLAYERS || players.length > MAX_PLAYERS) return;
     const reordered = orderPlayersForGame(players, seasonGames, false);
     const slot = getSecondGKSlot(reordered.length);
     const oracleH1 = reordered[0] ?? null;
@@ -158,8 +158,8 @@ export default function App() {
 
   // ── Generate team sheet
   const handleGenerate = useCallback(() => {
-    if (players.length < 6) { showToast('Need at least 6 players!', 'err'); return; }
-    if (players.length > 12) { showToast('Maximum 12 players.', 'err'); return; }
+    if (players.length < MIN_PLAYERS) { showToast(`Need at least ${MIN_PLAYERS} players!`, 'err'); return; }
+    if (players.length > MAX_PLAYERS) { showToast(`Maximum ${MAX_PLAYERS} players.`, 'err'); return; }
     const segs = buildSchedule(players, { gkH1, gkH2 });
     clearInProgress();
     setHasInProgress(false);
@@ -199,7 +199,7 @@ export default function App() {
     if (seasonGames.length === 0) return;
     const reordered = orderPlayersForGame(players, seasonGames, false);
     setPlayersText(reordered.join('\n'));
-    if (reordered.length >= 6 && reordered.length <= 12) {
+    if (reordered.length >= MIN_PLAYERS && reordered.length <= MAX_PLAYERS) {
       const slot = getSecondGKSlot(reordered.length);
       const oracleH1 = reordered[0] ?? null;
       const oracleH2 = (slot > 0 && reordered[slot]) ? reordered[slot] : null;
@@ -225,7 +225,16 @@ export default function App() {
 
   // ── Mid-game GK change (from TeamSheetView player modal)
   const handleChangeGK = useCallback((fromSegIdx, newGKName) => {
-    setSegments(prev => prev ? changeGKFromSegment(prev, fromSegIdx, newGKName) : prev);
+    const prev = segmentsRef.current;
+    if (!prev) return;
+    const next = changeGKFromSegment(prev, fromSegIdx, newGKName);
+    const issue = findLineupIssue(next);
+    if (issue) {
+      console.warn('[handleChangeGK] rejected:', issue);
+      showToast(`⚠️ GK change not applied — ${issue}`, 'err');
+      return;
+    }
+    setSegments(next);
     setIsSaved(false);
     showToast(`${newGKName} is now in goal`);
   }, [showToast]);
@@ -234,84 +243,100 @@ export default function App() {
   // Splits the active segment at the live clock time, locks the past portion,
   // and rebuilds the rest of the game for the new squad size. See replan.js
   // for the details. Equal share for the remainder — no catch-up weighting.
+  // Everything is computed OUTSIDE the state updaters — running the replan and
+  // toasts inside setGameClock's updater (the old shape) breaks React's
+  // pure-updater contract and double-fires in StrictMode (ISSUES.md Issue 6).
   const handleRosterChange = useCallback((event) => {
-    setGameClock(prevClock => {
-      if (prevClock.currentSegIdx === null) {
-        showToast("Game hasn't started — update the squad on Setup.", 'err');
-        return prevClock;
-      }
+    if (gameClock.currentSegIdx === null) {
+      showToast("Game hasn't started — update the squad on Setup.", 'err');
+      return;
+    }
 
-      // Reuse the exact elapsed-time formula from handleSplitSegment so the
-      // split point matches what the coach sees on the clock display.
-      const elapsedMs = prevClock.accumulatedMs +
-        (prevClock.isRunning && prevClock.segmentStartTime ? Date.now() - prevClock.segmentStartTime : 0);
-      const elapsedMinutes = Math.max(0, Math.round(elapsedMs / 60000));
+    // Same elapsed-time formula as handleSplitSegment so the split point
+    // matches the clock display. floor, not round — never lock unplayed time.
+    const elapsedMs = gameClock.accumulatedMs +
+      (gameClock.isRunning && gameClock.segmentStartTime ? Date.now() - gameClock.segmentStartTime : 0);
+    const elapsedMinutes = Math.max(0, Math.floor(elapsedMs / 60000));
 
-      const currentSegments = segmentsRef.current;
-      if (!currentSegments) {
-        showToast('No game in progress.', 'err');
-        return prevClock;
-      }
+    const currentSegments = segmentsRef.current;
+    if (!currentSegments) {
+      showToast('No game in progress.', 'err');
+      return;
+    }
 
-      // Derive the ACTIVE roster from the current segment (post any earlier
-      // injury, the React `players` list still holds removed names so calcStats
-      // can attribute their accrued minutes). Active = on field + on bench.
-      const activeSeg = currentSegments[prevClock.currentSegIdx];
-      const activeSet = new Set();
-      if (activeSeg) {
-        Object.values(activeSeg.assignment).forEach(n => { if (n) activeSet.add(n); });
-        activeSeg.bench.forEach(n => { if (n) activeSet.add(n); });
-      }
-      const activePlayers = players.filter(p => activeSet.has(p));
+    // Derive the ACTIVE roster from the current segment (post any earlier
+    // injury, the React `players` list still holds removed names so calcStats
+    // can attribute their accrued minutes). Active = on field + on bench.
+    const activeSeg = currentSegments[gameClock.currentSegIdx];
+    const activeSet = new Set();
+    if (activeSeg) {
+      Object.values(activeSeg.assignment).forEach(n => { if (n) activeSet.add(n); });
+      activeSeg.bench.forEach(n => { if (n) activeSet.add(n); });
+    }
+    const activePlayers = players.filter(p => activeSet.has(p));
 
-      let result;
-      try {
-        result = replanFromRosterChange(
-          {
-            segments:       currentSegments,
-            players:        activePlayers.length > 0 ? activePlayers : players,
-            currentSegIdx:  prevClock.currentSegIdx,
-            elapsedMinutes,
-            gkH1, gkH2,
-          },
-          event
-        );
-      } catch (err) {
-        showToast(err.message, 'err');
-        return prevClock;
-      }
+    let result;
+    try {
+      result = replanFromRosterChange(
+        {
+          segments:       currentSegments,
+          players:        activePlayers.length > 0 ? activePlayers : players,
+          currentSegIdx:  gameClock.currentSegIdx,
+          elapsedMinutes,
+          gkH1, gkH2,
+        },
+        event
+      );
+    } catch (err) {
+      showToast(err.message, 'err');
+      return;
+    }
 
-      const { newSegments, newPlayers, warnings } = result;
+    const { newSegments, newPlayers, warnings } = result;
 
-      setSegments(newSegments);
-      if (event.type === 'add' && !players.includes(event.name.trim())) {
-        // Append the new name to the existing roster (preserves any earlier
-        // removed players so calcStats keeps their accrued minutes)
-        setPlayersText([...players, event.name.trim()].join('\n'));
-      }
-      setIsSaved(false);
+    const issue = findLineupIssue(newSegments);
+    if (issue) {
+      console.warn('[handleRosterChange] rejected:', issue);
+      showToast(`⚠️ Change not applied — ${issue}`, 'err');
+      return;
+    }
 
-      const verb = event.type === 'add' ? 'added' : 'marked out';
-      showToast(`${event.name} ${verb} ✓`);
-      warnings.forEach(w => setTimeout(() => showToast(w), 50));
+    setSegments(newSegments);
+    if (event.type === 'add' && !players.includes(event.name.trim())) {
+      // Append the new name to the existing roster (preserves any earlier
+      // removed players so calcStats keeps their accrued minutes)
+      setPlayersText([...players, event.name.trim()].join('\n'));
+    }
+    setIsSaved(false);
 
-      // Pause the clock at the new boundary; advance currentSegIdx to the
-      // first segment of the rebuilt remainder. Match handleSplitSegment's pattern.
-      const futureIdx = elapsedMinutes > 0 ? prevClock.currentSegIdx + 1 : prevClock.currentSegIdx;
-      return {
-        segmentStartTime: null,
-        accumulatedMs:    0,
-        currentSegIdx:    Math.min(futureIdx, newSegments.length - 1),
-        isRunning:        false,
-      };
+    const verb = event.type === 'add' ? 'added' : 'marked out';
+    showToast(`${event.name} ${verb} ✓`);
+    warnings.forEach(w => setTimeout(() => showToast(w), 50));
+
+    // Pause the clock at the new boundary; advance currentSegIdx to the
+    // first segment of the rebuilt remainder. Match handleSplitSegment's pattern.
+    const futureIdx = elapsedMinutes > 0 ? gameClock.currentSegIdx + 1 : gameClock.currentSegIdx;
+    setGameClock({
+      segmentStartTime: null,
+      accumulatedMs:    0,
+      currentSegIdx:    Math.min(futureIdx, newSegments.length - 1),
+      isRunning:        false,
     });
-  }, [players, gkH1, gkH2, showToast]);
+  }, [players, gkH1, gkH2, gameClock, showToast]);
 
   // ── Manual player swap within a segment
+  // Computed synchronously off segmentsRef so the result can be validated
+  // BEFORE committing (ISSUES.md Issue 4): a swap that would duplicate or drop
+  // a player in the edited segment is rejected with a toast instead of being
+  // silently saved. Future segments are NOT validated here — the forward
+  // propagation below is transient by design and any membership change is
+  // healed by the rebalance when the coach taps FINISH EDITING.
   const handleSwap = useCallback((segIdx, swapAction) => {
-    setSegments(prev => {
-      const updated = [...prev];
-      updated[segIdx] = applySwap(prev[segIdx], swapAction);
+    const prev = segmentsRef.current;
+    if (!prev || !prev[segIdx]) return;
+
+    const updated = [...prev];
+    updated[segIdx] = applySwap(prev[segIdx], swapAction);
 
       // Position persistence: propagate forward through subsequent segments.
       //
@@ -362,8 +387,16 @@ export default function App() {
         };
       }
 
-      return updated;
-    });
+    // Guard the edited segment: no duplicates, nobody added or dropped
+    const issue = findLineupIssue([updated[segIdx]]) ||
+      findMembershipDrift(prev[segIdx], updated[segIdx]);
+    if (issue) {
+      console.warn('[handleSwap] rejected:', issue);
+      showToast(`⚠️ Swap not applied — ${issue}`, 'err');
+      return;
+    }
+
+    setSegments(updated);
     setIsSaved(false);
     showToast('Swap applied ✓');
   }, [showToast]);
@@ -375,7 +408,16 @@ export default function App() {
   // re-picked by most-minutes-played, so nobody is benched twice while someone
   // else never rests (ISSUES.md Issue 1).
   const handleRebalance = useCallback((segIdx) => {
-    setSegments(prev => prev ? rebalanceRemainder({ segments: prev, fromSegIdx: segIdx }) : prev);
+    const prev = segmentsRef.current;
+    if (!prev) return;
+    const next = rebalanceRemainder({ segments: prev, fromSegIdx: segIdx });
+    const issue = findLineupIssue(next);
+    if (issue) {
+      console.warn('[handleRebalance] rejected:', issue);
+      showToast(`⚠️ Rebalance failed — ${issue}. Check the lineup by hand.`, 'err');
+      return;
+    }
+    setSegments(next);
     setIsSaved(false);
     showToast('Rest of game rebalanced ✓');
   }, [showToast]);
@@ -535,7 +577,8 @@ export default function App() {
     } else {
       const elapsedMs = gameClock.accumulatedMs +
         (gameClock.isRunning && gameClock.segmentStartTime ? Date.now() - gameClock.segmentStartTime : 0);
-      mins = Math.round(elapsedMs / 60000);
+      // floor, not round — never lock time that hasn't been played yet
+      mins = Math.floor(elapsedMs / 60000);
     }
     const clamped = Math.min(Math.max(1, mins), seg.duration - 1);
 
@@ -715,7 +758,6 @@ export default function App() {
         seasonGames={seasonGames}
         onSwap={handleSwap}
         onSave={handleSave}
-        onReorder={handleReorder}
         onGoSeason={() => setView('season')}
         onGoSetup={() => { setView('setup'); setSegments(null); }}
         isSaved={isSaved}

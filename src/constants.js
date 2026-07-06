@@ -52,6 +52,13 @@ export const POS_LABEL = {
   LF: 'Left Forward', RF: 'Right Forward',
 };
 
+// Squad size limits. MIN_PLAYERS is the pre-game minimum to generate a
+// schedule (forfeit threshold). Mid-game injuries may still drop the active
+// roster to 6 — that floor lives in replan.js (MIN_SQUAD) on purpose so an
+// injury can always be recorded even below the pre-game minimum.
+export const MIN_PLAYERS = 7;
+export const MAX_PLAYERS = 12;
+
 // localStorage key for season data
 export const STORAGE_KEY = 'teamsheet_season';
 

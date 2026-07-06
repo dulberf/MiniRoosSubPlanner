@@ -81,13 +81,17 @@ test('mid-game bench swap + rebalance: everyone still rests exactly once', () =>
 test('late edit (one changeover left): rebalance still finds the optimal outcome', () => {
   const segs = buildSchedule(PLAYERS, { gkH1: 'Lyla', gkH2: 'Clara' });
 
-  // Coach double-benches someone at the FINAL changeover window (seg 2 of 4).
-  // Only 3 bench slots remain for 4 equally-played players, so one player on
-  // 50 min is unavoidable; spread 20 is the provable optimum here. The old
-  // code produced 25+ with arbitrary victims and inconsistent segments.
+  // Coach benches a never-rested player at the FINAL changeover window
+  // (seg 2 of 4). Only 3 bench slots remain for 4 equally-played players, so
+  // one player on 50 min is unavoidable; spread 20 is the provable optimum
+  // here. (Picking a never-rested player keeps the scenario deterministic —
+  // the position shuffle randomises who sits where, and benching an
+  // already-rested player pushes the optimal floor to 25.) The old code
+  // produced 25+ with arbitrary victims and inconsistent segments.
   const seg2 = segs[2];
+  const restedEarlier = new Set([...segs[0].bench, ...segs[1].bench]);
   const [pos, fieldPlayer] = Object.entries(seg2.assignment)
-    .find(([p, n]) => p !== 'GK' && n && !seg2.bench.includes(n));
+    .find(([p, n]) => p !== 'GK' && n && !seg2.bench.includes(n) && !restedEarlier.has(n));
   const edited = [...segs];
   edited[2] = applySwap(seg2, {
     from: { type: 'pos', pos, name: fieldPlayer },
@@ -145,9 +149,14 @@ test('an H1 edit rebalances H2 too, across the half-time boundary', () => {
   const rebalanced = rebalanceRemainder({ segments: edited, fromSegIdx: 0 });
 
   assertInvariants(rebalanced, PLAYERS);
+  // Everyone rests exactly once — including Clara, the H2 GK, whose only
+  // rest window is H1 (the forced-rest lookahead must catch her).
+  const counts = benchCounts(rebalanced, PLAYERS);
+  PLAYERS.forEach(p => assert.equal(counts[p], 1,
+    `${p} benched ${counts[p]}× — ${JSON.stringify(counts)}`));
   const mins = minutesFor(rebalanced, PLAYERS);
   const spread = Math.max(...Object.values(mins)) - Math.min(...Object.values(mins));
-  assert.ok(spread <= 15, `minutes spread ${spread} > 15: ${JSON.stringify(mins)}`);
+  assert.ok(spread <= 10, `minutes spread ${spread} > 10: ${JSON.stringify(mins)}`);
   // H2 GK survives the rebalance
   assert.equal(rebalanced[2].assignment.GK, 'Clara');
   assert.equal(rebalanced[3].assignment.GK, 'Clara');

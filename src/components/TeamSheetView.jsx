@@ -34,7 +34,7 @@ function getSubChanges(prev, curr) {
 }
 
 export default function TeamSheetView({
-  players, segments, seasonGames, onSwap, onSave, onReorder, onGoSeason, onGoSetup, isSaved, toast,
+  players, segments, seasonGames, onSwap, onSave, onGoSeason, onGoSetup, isSaved, toast,
   gameClock = { isRunning: false, accumulatedMs: 0, currentSegIdx: null, segmentStartTime: null },
   onStartPeriod, onPausePeriod, onSplitSegment, onAdvanceSegment, onNudgeClock, onResetClock, onResetGame,
   onChangeGK,
@@ -144,10 +144,12 @@ export default function TeamSheetView({
 
   useEffect(() => {
     let interval;
+    // Resync immediately on any run-state change — without this the first
+    // render after START used a stale `now`, making the readout jump for the
+    // first 1–2 seconds (Session 10 watch-list item).
+    setNow(Date.now());
     if (gameClock.isRunning) {
       interval = setInterval(() => setNow(Date.now()), 500);
-    } else {
-      setNow(Date.now());
     }
     return () => clearInterval(interval);
   }, [gameClock.isRunning]);
@@ -274,7 +276,9 @@ export default function TeamSheetView({
   const activeSegIdx = gameClock.currentSegIdx !== null ? gameClock.currentSegIdx : currentSeg;
   const activeSeg = segments[activeSegIdx];
   
-  const elapsedMs = gameClock.accumulatedMs + (gameClock.isRunning && gameClock.segmentStartTime ? now - gameClock.segmentStartTime : 0);
+  // Math.max(0, …) guards the one render where `now` predates segmentStartTime
+  // (START was just pressed and the interval hasn't ticked yet)
+  const elapsedMs = gameClock.accumulatedMs + (gameClock.isRunning && gameClock.segmentStartTime ? Math.max(0, now - gameClock.segmentStartTime) : 0);
   const remainingMsTotal = activeSeg ? (activeSeg.duration * 60000) - elapsedMs : 0;
   
   useEffect(() => {
@@ -656,6 +660,9 @@ export default function TeamSheetView({
         const mins  = parseInt(subPromptMins, 10);
         const canSplit = seg.duration >= 2;
         const valid = canSplit && Number.isFinite(mins) && mins >= 1 && mins <= seg.duration - 1;
+        // Once this period has any elapsed time, a whole-period rewrite would
+        // falsify minutes already played (the Round-8 bug class) — block it.
+        const periodUnderway = gameClock.currentSegIdx === currentSeg && elapsedMs > 0;
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 250, padding: 20 }}>
             <div style={{ background: '#fff', padding: 28, borderRadius: 24, width: '100%', maxWidth: 440, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
@@ -683,11 +690,14 @@ export default function TeamSheetView({
               )}
               <button
                 onClick={editWholePeriod}
-                style={{ width: '100%', marginTop: 10, padding: 14, fontSize: 14, fontWeight: 800, background: '#fff7ed', color: '#b45309', border: '3px solid #f59e0b', borderRadius: 12, cursor: 'pointer' }}>
+                disabled={periodUnderway}
+                style={{ width: '100%', marginTop: 10, padding: 14, fontSize: 14, fontWeight: 800, background: periodUnderway ? '#f1f5f9' : '#fff7ed', color: periodUnderway ? '#94a3b8' : '#b45309', border: `3px solid ${periodUnderway ? '#cbd5e1' : '#f59e0b'}`, borderRadius: 12, cursor: periodUnderway ? 'not-allowed' : 'pointer' }}>
                 ⚠️ Change the whole period instead
               </button>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#b45309', marginTop: 6, lineHeight: 1.4 }}>
-                "Whole period" rewrites who's on for all {seg.duration} minutes — only use it before this period has started.
+                {periodUnderway
+                  ? `This period is underway — a whole-period change would rewrite the ${Math.floor(elapsedMs / 60000)}+ minutes already played. Use the sub-from-time option above.`
+                  : `"Whole period" rewrites who's on for all ${seg.duration} minutes — only for periods that haven't started yet.`}
               </div>
               <button
                 onClick={() => setSubPrompt(false)}

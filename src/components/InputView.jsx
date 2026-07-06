@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { getSegmentConfig } from '../scheduler.js';
-import { POS_LABEL, DEFAULT_PLAYERS } from '../constants.js';
+import { POS_LABEL, DEFAULT_PLAYERS, MIN_PLAYERS, MAX_PLAYERS } from '../constants.js';
 
 export default function InputView({
   playersText, setPlayersText,
@@ -28,8 +28,7 @@ export default function InputView({
   const count    = activePlayers.length;
   const benchSz  = count > 9 ? count - 9 : 0;
   const shortSz  = count < 9 ? 9 - count : 0;
-  const MIN_PLAYERS = 7; // Adjust if your forfeit rule is different
-  const isValid  = count >= MIN_PLAYERS && count <= 12;
+  const isValid  = count >= MIN_PLAYERS && count <= MAX_PLAYERS;
 
   const config   = getSegmentConfig(count);
 

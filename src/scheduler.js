@@ -622,6 +622,48 @@ export function changeGKFromSegment(segments, fromSegIdx, newGKName) {
 }
 
 // ---------------------------------------------------------------------------
+// Lineup integrity guards (ISSUES.md Issue 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan segments for corrupt state. Returns a human-readable description of
+ * the first problem found, or null if the lineup is sound.
+ * Currently checks: no player may appear twice within a segment (field+bench).
+ */
+export function findLineupIssue(segments) {
+  if (!segments) return null;
+  for (const seg of segments) {
+    if (!seg?.assignment) continue;
+    const all = [...Object.values(seg.assignment).filter(Boolean), ...seg.bench.filter(Boolean)];
+    const seen = new Set();
+    for (const n of all) {
+      if (seen.has(n)) return `${n} appears twice in ${seg.label || `segment ${seg.segIdx}`}`;
+      seen.add(n);
+    }
+  }
+  return null;
+}
+
+/**
+ * Compare two versions of the same segment: a manual swap may move players
+ * between field and bench but must never add or drop anyone. Returns a
+ * description of the drift, or null if membership is identical.
+ */
+export function findMembershipDrift(before, after) {
+  const members = seg => {
+    const s = new Set();
+    Object.values(seg.assignment).forEach(n => { if (n) s.add(n); });
+    seg.bench.forEach(n => { if (n) s.add(n); });
+    return s;
+  };
+  const a = members(before);
+  const b = members(after);
+  for (const n of a) if (!b.has(n)) return `${n} vanished from ${after.label || 'the segment'}`;
+  for (const n of b) if (!a.has(n)) return `${n} appeared from nowhere in ${after.label || 'the segment'}`;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Statistics calculator
 // ---------------------------------------------------------------------------
 

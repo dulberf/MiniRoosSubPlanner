@@ -24,8 +24,10 @@ import { OUTFIELD } from './constants.js';
 
 const HALF_MIN   = 25;   // length of one half in minutes
 const FIELD_SIZE = 9;    // GK + 8 outfield positions
-const MIN_SQUAD  = 6;    // existing app accepts 6+ at kickoff
-const MAX_SQUAD  = 12;   // existing app caps at 12 at kickoff
+// Deliberately BELOW the pre-game minimum (constants.js MIN_PLAYERS = 7):
+// mid-game injuries must always be recordable, even if the squad drops to 6.
+const MIN_SQUAD  = 6;
+const MAX_SQUAD  = 12;   // matches constants.js MAX_PLAYERS
 
 // Below this many minutes remaining we don't try to rotate — single block.
 const MIN_ROTATION_MIN = 2;
@@ -545,16 +547,26 @@ export function rebalanceRemainder({ segments, fromSegIdx }) {
       ? seg.assignment.GK
       : prev.assignment.GK;
 
-    // Bench = the non-GK players who have played the most so far
-    const bench = active
-      .filter(p => p !== gk)
-      .map((p, idx) => ({ p, idx }))
-      .sort((a, b) =>
-        (minutes[b.p] - minutes[a.p]) ||
-        (stints[a.p] - stints[b.p]) ||
-        (a.idx - b.idx))
-      .slice(0, benchSize)
-      .map(x => x.p);
+    // Bench = the non-GK players who have played the most so far — EXCEPT that
+    // a player who keeps goal for every remaining segment after this one
+    // (i.e. the incoming H2 GK during the last H1 segment) can only rest NOW,
+    // so an unrested one is forced onto this bench ahead of the minutes
+    // ranking. Mirrors buildSchedule, which always rests the H2 GK pre-HT.
+    const isGKForRestOfGame = (p) => {
+      for (let j = i + 1; j < result.length; j++) {
+        const g = result[j].assignment.GK;
+        if (!(g && activeSet.has(g)) || g !== p) return false;
+      }
+      return i + 1 < result.length; // true only if there ARE later segments
+    };
+    const byRestNeed = (a, b) =>
+      (minutes[b.p] - minutes[a.p]) ||
+      (stints[a.p] - stints[b.p]) ||
+      (a.idx - b.idx);
+    const ranked = active.filter(p => p !== gk).map((p, idx) => ({ p, idx }));
+    const forced = ranked.filter(x => stints[x.p] === 0 && isGKForRestOfGame(x.p)).sort(byRestNeed);
+    const others = ranked.filter(x => !forced.includes(x)).sort(byRestNeed);
+    const bench = [...forced, ...others].slice(0, benchSize).map(x => x.p);
     const benchSet = new Set(bench);
 
     // Field: continuing players keep their previous position
