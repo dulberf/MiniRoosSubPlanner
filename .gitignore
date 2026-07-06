@@ -9,3 +9,6 @@ CLAUDE.md
 
 # Separate project sitting alongside this one with its own git repo
 MiniRoosSubPlanner/
+
+# Season data exports/backups - personal match data, keep out of the public repo
+teamsheet-season-*.json
