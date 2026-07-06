@@ -39,6 +39,7 @@ export default function TeamSheetView({
   onStartPeriod, onPausePeriod, onSplitSegment, onAdvanceSegment, onNudgeClock, onResetClock, onResetGame,
   onChangeGK,
   onRosterChange,
+  onRebalance,
   initialCurrentSeg = 0, initialMatchStats = {}, onProgressUpdate,
 }) {
   const [tab, setTab] = useState('field');
@@ -244,6 +245,31 @@ export default function TeamSheetView({
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [flushSave]); // flushSave is stable — registers once, never re-runs
+
+  // Rebalance-on-finish (ISSUES.md Issue 1). Snapshot the segment's bench
+  // membership when edit mode opens; when edit mode closes, if players were
+  // moved between field and bench (not just repositioned), ask App to re-pick
+  // bench duty for the rest of the game. Deliberately depends on editMode
+  // only — the snapshot must not refresh while the coach is mid-edit.
+  const editSnapshotRef = useRef(null);
+  useEffect(() => {
+    if (editMode) {
+      const s = segments[currentSeg];
+      editSnapshotRef.current = s
+        ? { segIdx: currentSeg, bench: s.bench.filter(Boolean).sort() }
+        : null;
+      return;
+    }
+    const snap = editSnapshotRef.current;
+    editSnapshotRef.current = null;
+    if (!snap || snap.segIdx >= segments.length - 1) return;
+    const s = segments[snap.segIdx];
+    if (!s) return;
+    const nowBench = s.bench.filter(Boolean).sort();
+    const changed = nowBench.length !== snap.bench.length ||
+      nowBench.some((n, i) => n !== snap.bench[i]);
+    if (changed) onRebalance?.(snap.segIdx);
+  }, [editMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeSegIdx = gameClock.currentSegIdx !== null ? gameClock.currentSegIdx : currentSeg;
   const activeSeg = segments[activeSegIdx];
@@ -958,6 +984,13 @@ export default function TeamSheetView({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Toast (App-level feedback: swaps, rebalance, GK + roster changes) ── */}
+      {toast && (
+        <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 400, background: toast.type === 'err' ? '#dc2626' : '#059669', color: '#fff', padding: '12px 24px', borderRadius: 12, fontSize: 15, fontWeight: 800, boxShadow: '0 10px 30px rgba(0,0,0,0.25)', pointerEvents: 'none', maxWidth: '90vw', textAlign: 'center' }}>
+          {toast.msg}
         </div>
       )}
 

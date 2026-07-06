@@ -9,15 +9,25 @@ import TeamSheetView  from './components/TeamSheetView.jsx';
 import SeasonView     from './components/SeasonView.jsx';
 
 import { buildSchedule, orderPlayersForGame, applySwap, calcStats, splitSegment, changeGKFromSegment, getSecondGKSlot } from './scheduler.js';
-import { replanFromRosterChange } from './replan.js';
+import { replanFromRosterChange, rebalanceRemainder } from './replan.js';
 import { STORAGE_KEY, IN_PROGRESS_KEY, DEFAULT_PLAYERS } from './constants.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Stable per-game id so edits/re-saves replace the game instead of appending a
+// duplicate (ISSUES.md Issue 3 — the old identity was "today's date + players",
+// which broke whenever a game was edited on a later day).
+function newGameId() {
+  try { return crypto.randomUUID(); }
+  catch { return 'g-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+}
+
 function loadSeason() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const games = raw ? JSON.parse(raw) : [];
+    // Lazy migration: give legacy games a stable id
+    return games.map(g => g.id ? g : { ...g, id: newGameId() });
   } catch {
     return [];
   }
@@ -54,6 +64,8 @@ export default function App() {
   // ── Generated game state
   const [segments,    setSegments]    = useState(null);
   const [isSaved,     setIsSaved]     = useState(false);
+  // Stable id of the season entry this game was saved as (null until first save)
+  const [currentGameId, setCurrentGameId] = useState(null);
 
   // ── Crash recovery
   const [resumeData,    setResumeData]    = useState(null);
@@ -154,6 +166,7 @@ export default function App() {
     setInitialSegData({ currentSeg: 0, matchStats: {} });
     setSegments(segs);
     setIsSaved(false);
+    setCurrentGameId(null);
     setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: null, isRunning: false });
     setView('result');
   }, [players, gkH1, gkH2, showToast]);
@@ -205,6 +218,7 @@ export default function App() {
       setGkH2(finalH2);
       setSegments(buildSchedule(reordered, { gkH1: finalH1, gkH2: finalH2 }));
       setIsSaved(false);
+      setCurrentGameId(null);
       if (view === 'setup') setView('result');
     }
   }, [players, seasonGames, view, gkH1, gkH2]);
@@ -354,6 +368,18 @@ export default function App() {
     showToast('Swap applied ✓');
   }, [showToast]);
 
+  // ── Rebalance the rest of the game after a manual bench change ──────────
+  // Fired by TeamSheetView when edit mode closes and the segment's bench
+  // membership changed. The edited segment stays exactly as the coach set it;
+  // every later segment keeps its duration and scheduled GK but gets its bench
+  // re-picked by most-minutes-played, so nobody is benched twice while someone
+  // else never rests (ISSUES.md Issue 1).
+  const handleRebalance = useCallback((segIdx) => {
+    setSegments(prev => prev ? rebalanceRemainder({ segments: prev, fromSegIdx: segIdx }) : prev);
+    setIsSaved(false);
+    showToast('Rest of game rebalanced ✓');
+  }, [showToast]);
+
   // ── Game clock controls ──────────────────────────────────────────────────
   //
   // The clock is per-SEGMENT but auto-rolls to the next segment when the
@@ -479,6 +505,7 @@ export default function App() {
   const resetGame = useCallback(() => {
     setSegments(null);
     setIsSaved(false);
+    setCurrentGameId(null);
     setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: null, isRunning: false });
     setView('setup');
   }, []);
@@ -536,7 +563,11 @@ export default function App() {
     const result = (ourScore != null && oppositionScore != null)
       ? (ourScore > oppositionScore ? 'W' : ourScore < oppositionScore ? 'L' : 'D')
       : null;
+    // Editing an already-saved game replaces it by id and keeps its original
+    // match date; a fresh game gets a new id and today's date.
+    const editingId = isSaved ? currentGameId : null;
     const game  = {
+      id:             editingId || newGameId(),
       date:           `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`,
       label:          label || '',
       players:        [...players],
@@ -553,26 +584,23 @@ export default function App() {
     };
 
     setSeasonGames(prev => {
-      // If already saved (editing), replace the last matching entry
-      if (isSaved) {
-        const idx = [...prev].reverse().findIndex(
-          g => g.date === game.date && JSON.stringify(g.players) === JSON.stringify(players)
-        );
+      if (editingId) {
+        const idx = prev.findIndex(g => g.id === editingId);
         if (idx !== -1) {
-          const realIdx = prev.length - 1 - idx;
           const next = [...prev];
-          next[realIdx] = game;
+          next[idx] = { ...game, date: prev[idx].date }; // keep original match date
           return next;
         }
       }
       return [...prev, game];
     });
 
+    setCurrentGameId(game.id);
     setIsSaved(true);
     clearInProgress();
     setHasInProgress(false);
     showToast(isSaved ? 'Changes saved ✓' : 'Saved to season ✓');
-  }, [segments, players, isSaved, showToast]);
+  }, [segments, players, isSaved, currentGameId, showToast]);
 
   // ── Season management
   const handleDeleteGame = useCallback((idx) => {
@@ -604,12 +632,14 @@ export default function App() {
         const merged = [...seasonGames];
         let added = 0;
         incoming.forEach(game => {
+          // Dedup by stable id when both sides have one; legacy key otherwise
           const dup = seasonGames.some(eg =>
-            eg.date === game.date &&
-            JSON.stringify(eg.players) === JSON.stringify(game.players) &&
-            eg.label === game.label
+            (eg.id && game.id && eg.id === game.id) ||
+            (eg.date === game.date &&
+             JSON.stringify(eg.players) === JSON.stringify(game.players) &&
+             eg.label === game.label)
           );
-          if (!dup) { merged.push(game); added++; }
+          if (!dup) { merged.push(game.id ? game : { ...game, id: newGameId() }); added++; }
         });
         if (added === 0) {
           setImportMsg({ type: 'err', msg: 'No new games — all already imported' });
@@ -700,6 +730,7 @@ export default function App() {
         onSplitSegment={handleSplitSegment}
         onChangeGK={handleChangeGK}
         onRosterChange={handleRosterChange}
+        onRebalance={handleRebalance}
         initialCurrentSeg={initialSegData.currentSeg}
         initialMatchStats={initialSegData.matchStats}
         onProgressUpdate={handleProgressUpdate}

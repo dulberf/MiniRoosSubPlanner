@@ -195,8 +195,15 @@ export function orderPlayersForGame(players, history, lockGK = false) {
       lastGKGame[h2GK] = gameIdx;
     }
 
-    game.players?.forEach((p, idx) => {
-      if (benchMins[p] !== undefined) benchMins[p] += weights[idx] || 0;
+    // Real bench minutes from the saved segments. game.players order has no
+    // relationship to rotation slots (buildSchedule reorders and shuffles
+    // internally, and mid-game edits change reality), so attributing template
+    // weights by index credits bench time to the wrong players (ISSUES.md
+    // Issue 2).
+    segs.forEach(seg => {
+      seg.bench?.forEach(name => {
+        if (name && benchMins[name] !== undefined) benchMins[name] += seg.duration || 0;
+      });
     });
   });
 

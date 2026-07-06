@@ -480,6 +480,122 @@ function applySegmentMinutes(cumulative, segments) {
 }
 
 // ---------------------------------------------------------------------------
+// MANUAL-EDIT REBALANCE
+// ---------------------------------------------------------------------------
+
+/**
+ * Rebalance bench duty for every segment after fromSegIdx.
+ *
+ * Called after a manual edit changes WHO is on the field vs the bench in a
+ * segment (ISSUES.md Issue 1: previously the future segments kept their
+ * generate-time bench lists, so a player the coach had just rested was
+ * benched a second time while whoever stayed on never rested).
+ *
+ * The edited segment is preserved verbatim. Every later segment keeps its
+ * duration, label, half, htBefore/subBefore flags and its scheduled GK, but
+ * the bench is re-picked greedily: the non-GK players with the most projected
+ * minutes rest next (ties: fewest bench stints so far, then stable order).
+ * Field positions follow the scheduler's continuity rules — players who stay
+ * on keep their position, incomers prefer their last outfield spot.
+ *
+ * Works across the half-time boundary: each segment's scheduled GK is
+ * respected, so an H1 edit also rebalances H2 without touching the GK plan.
+ *
+ * Returns a NEW segments array (input untouched). Returns the input array
+ * unchanged when there is no bench or nothing after fromSegIdx.
+ */
+export function rebalanceRemainder({ segments, fromSegIdx }) {
+  if (!segments || fromSegIdx == null || fromSegIdx < 0 || fromSegIdx >= segments.length - 1) {
+    return segments;
+  }
+  const edited = segments[fromSegIdx];
+  if (!edited?.assignment) return segments;
+
+  // Active roster + bench size come from the edited segment (field ∪ bench),
+  // so earlier roster changes (injury / late arrival) are respected.
+  const active = [];
+  Object.values(edited.assignment).forEach(n => { if (n && !active.includes(n)) active.push(n); });
+  edited.bench.forEach(n => { if (n && !active.includes(n)) active.push(n); });
+  const benchSize = Math.max(0, active.length - FIELD_SIZE);
+  if (benchSize === 0) return segments;
+  const activeSet = new Set(active);
+
+  // Minutes and bench stints through the edited segment (inclusive)
+  const minutes = Object.fromEntries(active.map(p => [p, 0]));
+  const stints  = Object.fromEntries(active.map(p => [p, 0]));
+  for (let i = 0; i <= fromSegIdx; i++) {
+    const seg = segments[i];
+    if (!seg) continue;
+    Object.values(seg.assignment).forEach(n => { if (n && minutes[n] !== undefined) minutes[n] += seg.duration; });
+    seg.bench.forEach(n => { if (n && stints[n] !== undefined) stints[n]++; });
+  }
+
+  const lastOutfieldPos = buildLastOutfieldPos(segments.slice(0, fromSegIdx + 1));
+
+  const result = segments.map(s => structuredClone(s));
+  let prev = result[fromSegIdx];
+
+  for (let i = fromSegIdx + 1; i < result.length; i++) {
+    const seg = result[i];
+    if (seg.locked) { prev = seg; continue; } // defensive — locked segs are history
+
+    // Respect this segment's scheduled GK; fall back to the previous GK if the
+    // scheduled one is no longer in the active roster.
+    const gk = (seg.assignment.GK && activeSet.has(seg.assignment.GK))
+      ? seg.assignment.GK
+      : prev.assignment.GK;
+
+    // Bench = the non-GK players who have played the most so far
+    const bench = active
+      .filter(p => p !== gk)
+      .map((p, idx) => ({ p, idx }))
+      .sort((a, b) =>
+        (minutes[b.p] - minutes[a.p]) ||
+        (stints[a.p] - stints[b.p]) ||
+        (a.idx - b.idx))
+      .slice(0, benchSize)
+      .map(x => x.p);
+    const benchSet = new Set(bench);
+
+    // Field: continuing players keep their previous position
+    const newAssignment = { GK: gk };
+    OUTFIELD.forEach(pos => { newAssignment[pos] = null; });
+    const placed = new Set([gk]);
+    OUTFIELD.forEach(pos => {
+      const n = prev.assignment[pos];
+      if (n && activeSet.has(n) && !benchSet.has(n) && n !== gk) {
+        newAssignment[pos] = n;
+        placed.add(n);
+      }
+    });
+    // Everyone else active and not benched needs a spot (incl. an outgoing GK)
+    const incoming  = active.filter(p => !placed.has(p) && !benchSet.has(p));
+    const vacant    = new Set(OUTFIELD.filter(pos => !newAssignment[pos]));
+    const unmatched = [];
+    incoming.forEach(p => {
+      const pref = lastOutfieldPos[p];
+      if (pref && vacant.has(pref)) { newAssignment[pref] = p; vacant.delete(pref); }
+      else unmatched.push(p);
+    });
+    const leftover = [...vacant];
+    unmatched.forEach((p, k) => { if (leftover[k] !== undefined) newAssignment[leftover[k]] = p; });
+
+    // Book-keeping for the next boundary
+    Object.entries(newAssignment).forEach(([pos, n]) => {
+      if (!n) return;
+      if (pos !== 'GK') lastOutfieldPos[n] = pos;
+      minutes[n] += seg.duration;
+    });
+    bench.forEach(n => { stints[n]++; });
+
+    result[i] = { ...seg, assignment: newAssignment, bench, gkName: gk, edited: false };
+    prev = result[i];
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // VALIDATION
 // ---------------------------------------------------------------------------
 

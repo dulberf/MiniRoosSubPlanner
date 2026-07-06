@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-06-22 (Session 10 complete)*
+*Last updated: 2026-07-06 (Session 11 complete)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -163,6 +163,32 @@ Dedup key: `date + JSON.stringify(players) + label`.
 ---
 
 ## Session History
+
+### Session 11 — Rebalance after manual edits + fairness-oracle fix + stable game ids ✅
+**Context:** Full audit (see `ISSUES.md`) diagnosed the coach's "app subs kids off a 2nd time" report. Season data showed every edited game had double-benched players (worst: Gwandelen r8 4/7 — Grace & Gen 20 min while three players played the full 50).
+
+**Issue 1 fixed — manual bench moves now rebalance the rest of the game:**
+- Root cause: `handleSwap` propagation rebuilt future `assignment`s but kept every future segment's `bench` array as baked at generate time, so the rotation kept executing the original plan after a manual field↔bench change.
+- New `rebalanceRemainder({ segments, fromSegIdx })` in `replan.js`: preserves the edited segment verbatim and every later segment's duration/label/half/flags/scheduled GK, but re-picks each later bench greedily — non-GK players with the most projected minutes rest next (ties: fewest bench stints, then stable order). Positional continuity follows the scheduler's rules. Walks across the HT boundary, so an H1 edit rebalances H2 too.
+- Trigger: `TeamSheetView` snapshots the segment's bench membership when edit mode opens; on FINISH EDITING (or any edit-mode exit), if membership changed (not just positions), it calls `onRebalance(segIdx)` → `handleRebalance` in App. Pure position swaps keep the old propagation path.
+- **Toast fix:** TeamSheetView received the `toast` prop but never rendered it — all game-screen toasts (swap applied, GK change, roster warnings) were invisible. Now rendered as a fixed top-center overlay (zIndex 400).
+
+**Issue 2 fixed — season fairness oracle now reads real bench minutes:**
+- `orderPlayersForGame` previously attributed bench minutes by index into `game.players` via `buildBenchMinuteWeights` — but that order has no relationship to rotation slots (buildSchedule reorders/shuffles internally; edits change reality). Bench-fairness balancing was noise all season.
+- Now tallies actual bench minutes from `game.segments` (same loop SeasonView uses). `buildBenchMinuteWeights` is still used for its correct job: ranking the upcoming game's slots by bench weight.
+
+**Issue 3 fixed — stable game ids stop duplicate saves:**
+- Old identity was "today's date + players JSON"; editing a game on a later day appended a duplicate (proof: games 27/6 "Budgiewoi r7" and 4/7 blank-label are byte-identical in the season export).
+- Every game now gets `id: crypto.randomUUID()` on first save; edits replace by id and preserve the original match date; `loadSeason` lazily migrates legacy games; import dedups by id with the legacy key as fallback. New `currentGameId` state in App, reset on generate/reorder/reset.
+- ⚠️ **The existing duplicate (4/7/2026, blank label) must still be deleted manually in the Season view on the iPad** — code can't remove it retroactively.
+
+**Tests:** `test/rebalance.test.mjs` (6 new tests, 9 total passing): mid-game swap → everyone rests exactly once, spread ≤ 10; late-edit case → optimal spread ≤ 20 (provably minimal with one changeover left); edited segment/durations/labels/GK plan preserved; H1 edit rebalances H2; no-op guards; oracle reads real bench minutes.
+
+**Verified in dev preview end-to-end:** benched Lyla (scheduled to rest seg 3) in seg 1 via EDIT LINEUP → FINISH EDITING → seg-3 bench dropped Lyla, seg-2 bench picked up Grace, everyone rests exactly once, "Rest of game rebalanced ✓" toast visible.
+
+**Files touched:** `src/replan.js`, `src/scheduler.js`, `src/App.jsx`, `src/components/TeamSheetView.jsx`, `test/rebalance.test.mjs` (new), `ISSUES.md` (status), `team-sheet-offline.html` (rebuilt).
+
+**Still open from the audit:** ISSUES.md Issues 4 (invariant guard), 5 (whole-period escape hatch guard), 6 (code-health list).
 
 ### Session 10 — Emergency-sub time anchor + replan duration fix ✅
 **Bug (the weekend, Round 8 Terrigal 20/6):** A 12-player game came out with Ivy on the full 50 min and Cara on only 25. Diagnosed from the season export.
