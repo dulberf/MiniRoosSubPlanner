@@ -44,6 +44,51 @@ export const POS_BORDER = {
   LF: '#ffffff', RF: '#111827',
 };
 
+// Plain-English wristband colour per position. The kids are identified by the
+// colour band on their wrist, so the player sheet names the colour out loud
+// rather than relying on the swatch alone.
+export const POS_BAND = {
+  GK: 'magenta',
+  LB: 'black', CB: 'grey', RB: 'white',
+  LM: 'black', CM: 'grey', RM: 'white',
+  LF: 'black', RF: 'white',
+};
+
+// ── Sideline UI design tokens (Session 13 redesign) ────────────────────────
+// Navy chrome + exactly three status colours. The old palette used ~8 competing
+// hues, which is what made the wristband colours hard to read in direct sun.
+// Nothing here may compete with POS_BG — those are physical wristbands.
+export const UI = {
+  navy:        '#0f2d5a',  // header bars, primary buttons, heavy borders, primary text
+  blueLine:    '#c7daf7',  // 2px hairlines, inactive borders, dividers
+  page:        '#f0f6ff',  // screen background
+  track:       '#e2ecfc',  // bar-chart tracks, inactive pip fills
+  bodyText:    '#4a6b8a',  // secondary text
+  label:       '#7a96b0',  // all-caps section labels, tertiary text
+  onNavyMuted: '#a8c6ee',  // secondary text on navy
+  onNavyBorder:'#5e8ecd',  // outlined button borders on navy
+  backdrop:    'rgba(15,45,90,0.92)',
+  scrim:       'rgba(15,45,90,0.35)',
+  white:       '#ffffff',
+
+  go:          '#0b7a3b',  // clock running, player coming ON, save
+  goTint:      '#e8f3ec',
+  goOnDark:    '#bee0cb',
+  stop:        '#c62828',  // sub imminent, player coming OFF, fairness outlier
+  stopOnDark:  '#f3c1c1',
+  warn:        '#b25e00',  // clock NOT running, data mismatch
+  warnTint:    '#fdf1e3',
+  warnText:    '#7a4100',
+  warnOnDark:  '#f6ddbe',
+
+  pitch:       '#2f7d3c',  // flat fill — the old gradient cost token contrast
+};
+
+// The design was drawn at 1024px wide (iPad portrait at 1x). Every size in the
+// spec is scaled by viewportWidth / DESIGN_WIDTH so it lands 1:1 on a 12.9"
+// iPad and proportionally (0.79) on the 10.2" iPad actually used at the field.
+export const DESIGN_WIDTH = 1024;
+
 // Human-readable position labels
 export const POS_LABEL = {
   GK: 'Goalkeeper',

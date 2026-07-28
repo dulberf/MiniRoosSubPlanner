@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-07-06 (Session 11 complete)*
+*Last updated: 2026-07-28 (Session 13 complete — on branch `ui/sideline-redesign`)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -21,10 +21,11 @@ football-sub-planner/
 │   ├── App.jsx                    # Root component — state, routing, handlers
 │   ├── scheduler.js               # Core rotation algorithm (bench slots, GK, stats)
 │   ├── replan.js                  # Mid-game roster change handler (late arrival / injury)
-│   ├── constants.js               # Positions, colours, field layout, STORAGE_KEY, IN_PROGRESS_KEY
+│   ├── constants.js               # Positions, wristband colours, UI tokens, field layout, storage keys
+│   ├── useScale.js                # Maps the 1024px design onto the actual viewport — s(px) helper
 │   └── components/
 │       ├── InputView.jsx          # Setup screen — player list, H1/H2 GK picker dropdowns, import/export
-│       ├── TeamSheetView.jsx      # Live game screen — field, clock, swaps, notes, save modal
+│       ├── TeamSheetView.jsx      # Live game screen — header/pips/pitch/bench rail/action stack
 │       ├── SeasonView.jsx         # Season tracker — game history, fairness stats, edit modal
 │       ├── FieldView.jsx          # Interactive field diagram with player tokens
 │       ├── PlayerToken.jsx        # Circular player badge (colour, rings, size)
@@ -76,11 +77,15 @@ All row gaps are uniform at 23% so the sub label below each token never overlaps
 > Mnemonic (from `src/constants.js`): **"White Rhymes with Right"** — Right-side positions are WHITE, Left-side are BLACK. This table previously had the two swapped; `src/constants.js` is the source of truth and matches what's on the field. Do not "fix" the code to match old docs.
 
 ### Token sizing (`src/components/FieldView.jsx`)
-Token size calculated from field container width via ResizeObserver (not `window.innerWidth`):
-```js
-size = Math.min(108, Math.max(40, Math.round(containerWidth * 0.21)))
-```
-Font size: `Math.max(8, size * 0.19)`.
+Token size is measured from the rendered pitch box via ResizeObserver (not `window.innerWidth`), with
+the cap and floor scaled by the design factor — 124/96 at 1024px wide, 98/76 on the coach's iPad.
+Since Session 13 the pitch is sized from the available **height** (`aspectRatio: 100/148` + `flex: 1`),
+so the measured width is a result of the layout, not an input to it. Do not go back to
+`paddingBottom: 148%` — it overflows the pitch/rail split.
+
+Token borders are constant navy (`UI.navy`), or `UI.stop` red when that player is in the next change.
+The per-position inverted border was removed in Session 13 — `POS_BORDER` still exists in
+`constants.js` but is no longer used on the field.
 
 ---
 
@@ -163,6 +168,92 @@ Dedup key: `date + JSON.stringify(players) + label`.
 ---
 
 ## Session History
+
+### Session 13 — Sideline UI redesign, part 1: live game + player sheet ✅
+**Branch:** `ui/sideline-redesign` (not merged to main — test at a game first).
+
+**Source:** design handoff bundle `Football app sideline interface.zip` (Claude Design session) —
+`design_handoff_sideline_ui/README.md` is the spec, `screens/*.png` the renders, `Sideline UI.dc.html`
+the reference prototype. Scope agreed with the coach: screens **2a (live game)** and **2b (player
+answer sheet)** only. `2c` honours, `2d` save and `2e` season are next session; they keep their
+current layout and open from the new tool row.
+
+**The four problems it fixes** (all coach-reported):
+1. *Subs get missed* — the boundary popup ("Period N started, call these subs" + Got It) is **deleted**.
+   Replaced by a persistent red **✓ SUBS DONE — Cara ▶ LM · Clara ▶ LF** button in the action stack
+   that does not self-dismiss. Tapping it clears to a green "Subs made ✓ · UNDO" for 8s (the UNDO
+   covers a stray tap, which is the one weakness of a button over the spec's slide control).
+2. *Clock left un-started / un-paused* — the **entire header turns amber** whenever the clock isn't
+   running, with a non-dismissible "Clock is not running" line and a large white ▶ START button.
+3. *"Who am I going on for?"* — bench rail cards read **`▲ ON for Ellery · RB`** in full, permanently.
+4. *"When am I going back on?"* — `BACK ON` list and the player sheet's "YOU GO BACK ON AT 35′" card.
+
+**Decisions taken with the coach (differ from the spec — do not "fix" back):**
+- **Big button, not slide-to-confirm.** The spec's drag control was judged gimmicky and awkward
+  one-handed in the wet. A demo of drag / button / press-and-hold was built and tried first.
+- **The button acknowledges; it does not advance the segment.** The clock still auto-advances on time
+  exactly as before (`TeamSheetView.jsx` boundary effect unchanged), so minutes and season stats are
+  completely untouched. Making the slide *perform* the advance would reintroduce the Round-8 drift.
+- **System fonts, not Archivo.** All spec sizes/weights/letter-spacing matched, but no webfont — the
+  offline-first single-file rule wins.
+- **`GOAL` tool button opens a tap-a-name picker** (scorer → optional assist). The per-player +/−
+  steppers in the player sheet still work; the picker is an additional path, not a replacement.
+
+**Scaling — read this before changing any size.** The design is drawn at **1024px** wide. The coach's
+iPad (9th gen, home button) is **810 × 1080** — the same 3:4 ratio as the 1024 × 1366 design, so a
+single uniform factor maps it across with no reflow. `src/useScale.js` exports `useScale()` returning
+`{ scale, s }`; **every** spec pixel goes through `s(px)`. `scale = clamp(innerWidth / 1024, 0.55, 1.15)`.
+Do not hardcode px in this component.
+
+**New files:** `src/useScale.js`, `test/next-appearance.test.mjs`.
+
+**`constants.js`:** new `UI` token export (navy chrome + exactly three status colours — go/stop/warn),
+`POS_BAND` (plain-English wristband colour per position), `DESIGN_WIDTH`. `POS_BG` / `POS_TEXT`
+untouched — they are the kids' physical wristbands. The old ~8-hue palette is gone; that collapse is
+what makes the wristband colours legible in sun.
+
+**`scheduler.js`:** one addition, `nextAppearance(segments, fromSegIdx, playerName) → { minute, pos,
+segIdx } | null`. Pure, walks forward summing durations. Nothing existing changed. 5 new tests.
+
+**`TeamSheetView.jsx`** (near-total rewrite of the render tree; all state, effects, handlers and
+modals preserved):
+- Layout is now header → period pips → body (pitch left / 322px bench rail right) → action stack.
+- `−1 MIN` / `+1 MIN` surfaced from the old hidden clock dropdown; Reset Period / Reset Game moved
+  out of it into the SQUAD sheet (they were one tap from a destructive wipe).
+- Tool row: `⚽ GOAL · 🧤 GK · 👥 SQUAD · 🏆 HONOURS · 📅 SEASON · 💾 SAVE`, 88px targets.
+- **`SQUAD` sheet** re-homes the orphaned features: late player, player out, edit lineup/sub, match
+  notes, Show Kids, reset period, reset game.
+- **Player sheet (2b)** replaces the fat-finger bottom panel. `minutesPlayedSoFar()` is deliberately
+  *not* `calcStats` — the sheet says "min played", so it counts completed periods plus live elapsed,
+  not the whole-game projection.
+- **`READ NEXT SUB SCRIPT` deleted** — the rail names every incoming player permanently, which beats
+  a modal you have to open.
+- ⚠️ **Every path into the lineup editor now goes through `handleEmergencySub(from)`**, including
+  `🔀 MOVE POSITION` in the player sheet. The Session 10/12 time-anchored split, the split prompt and
+  the guarded whole-period escape hatch are all preserved verbatim. `pendingSwapRef` carries the
+  requested swap across the split. Do not add a path that calls `setEditMode(true)` directly on a
+  live period — that is the Round-8 bug.
+
+**`FieldView.jsx`:** sized from height (`aspectRatio: 100/148` + `flex: 1`) instead of
+`paddingBottom: 148%`, which is width-driven and overflowed the new split layout. Flat `#2f7d3c`
+pitch (the 5-stop gradient cost token contrast). Dashed red ring and `▲ IN: name` badge replaced by a
+live `▼ OFF 1:42` badge under the outgoing player.
+
+**`PlayerToken.jsx`:** border is now constant navy (red when in the next change) instead of the
+per-position inverted border — white and grey tokens were dissolving into the pitch in sun. Shadows
+removed. **Fills unchanged.**
+
+**`FieldSVG.jsx`:** pared to outline, halfway line, centre circle, two penalty boxes, two goals.
+
+**Verified end-to-end in dev preview at 810 × 1080:** generate → START (navy header, green PAUSE) →
+wind to boundary (auto-advance fires, red SUBS DONE bar persists, no modal) → acknowledge → UNDO →
+tap token (player sheet with correct come-off/go-back-on answers) → MOVE POSITION (splits the period,
+locks the past, P1–P5, edit mode with the player selected) → FINISH EDITING → SQUAD sheet → GOAL
+picker (scorer → assist, header tally increments) → Show Kids → back. **No console errors.** 17/17 tests.
+
+**Still to do (Session 14):** screens 2c honours, 2d save, 2e season (the 11-column table → one sorted
+fairness list). Also: bench rail cards and pitch tokens are `div`s with `onClick`, not buttons — fine
+for touch, poor for accessibility.
 
 ### Session 12 — Audit cleanup: invariant guards, escape-hatch guard, code health, clock jump ✅
 **Scope:** ISSUES.md Issues 4–6 plus the Session-10 clock watch-list item. No behaviour changes to the core rotation beyond one algorithm improvement found by the new tests (below).
@@ -375,15 +466,21 @@ Dedup key: `date + JSON.stringify(players) + label`.
 - **No `window.confirm()` or `window.alert()`** — sandboxed iframe. All confirmations use inline modal overlays.
 - **Toast notifications:** 2800ms auto-dismiss. `ok` (green) / `err` (red) via `showToast(msg, type)` in `App.jsx`.
 - **Date format:** `D/M/YYYY` — not zero-padded.
-- **Colour palette (do not change):**
-  - Page background: `#f0f6ff`
-  - Primary text: `#0f2d5a`
-  - Blue accent: `#1558b0` / `#1d6fcf`
-  - Green: `#059669`
-  - Amber: `#d97706`
-  - Red: `#dc2626`
-  - Magenta (GK): `#d946ef`
-- **No external fonts** — system-ui / Segoe UI only.
+- **Colour palette — use the `UI` export in `src/constants.js`, nothing else.** Since Session 13 the
+  chrome is navy plus exactly three status colours. Adding a fourth accent is a regression: the point
+  of the collapse is that nothing competes with the four wristband colours in direct sun.
+  - `UI.navy` `#0f2d5a` · `UI.blueLine` `#c7daf7` · `UI.page` `#f0f6ff` · `UI.track` `#e2ecfc`
+  - `UI.bodyText` `#4a6b8a` · `UI.label` `#7a96b0`
+  - `UI.go` `#0b7a3b` (running / coming on / save) · `UI.stop` `#c62828` (sub imminent / coming off)
+    · `UI.warn` `#b25e00` (clock not running / data mismatch)
+  - Wristbands (`POS_BG`, do not change): GK magenta `#d946ef`, left black `#111827`,
+    centre grey `#b0bec5`, right white `#ffffff`
+- **No external fonts** — system-ui / Segoe UI only. The Session 13 design specified Archivo; it was
+  deliberately not adopted, because self-hosting a webfont in the single-file offline build isn't
+  worth 40–80KB. Match the spec's sizes and weights, not its family.
+- **Minimum on-screen text is 15px**, and only for all-caps labels. Minimum touch target 88px for
+  anything used during a game.
+- **All sizes go through `s(px)` from `useScale()`** in the live game screen — never hardcode px.
 - **Offline first** — no CDN, no network calls, everything compiled into the single HTML.
 
 ---
