@@ -156,6 +156,57 @@ function reorderForExplicitGKs(players, gkH1, gkH2) {
 }
 
 /**
+ * Tallies GK history from saved games. GK duty is recovered from
+ * `segment.half` + `assignment.GK` — saved games have no gkH1/gkH2 fields, so
+ * this is the only place the information exists.
+ *
+ * Returns { gkStints, lastGKGame } keyed by player name. `lastGKGame` is the
+ * index of the most recent game the player kept goal, or -1 for never.
+ */
+function tallyGKHistory(players, history) {
+  const gkStints   = Object.fromEntries(players.map(p => [p, 0]));
+  const lastGKGame = Object.fromEntries(players.map(p => [p, -1]));
+
+  (history || []).forEach((game, gameIdx) => {
+    const segs = game.segments;
+    if (!segs) return;
+    const h1GK = segs.find(s => s.half === 1)?.assignment?.GK;
+    const h2GK = segs.find(s => s.half === 2)?.assignment?.GK;
+    if (h1GK && gkStints[h1GK] !== undefined) {
+      gkStints[h1GK]++;
+      lastGKGame[h1GK] = gameIdx;
+    }
+    if (h2GK && h2GK !== h1GK && gkStints[h2GK] !== undefined) {
+      gkStints[h2GK]++;
+      lastGKGame[h2GK] = gameIdx;
+    }
+  });
+
+  return { gkStints, lastGKGame };
+}
+
+/**
+ * Ranks players by who is most overdue a turn in goal: fewest stints first,
+ * then longest since their last one, then stable input order.
+ *
+ * This is the ordering the setup screen's GK chip row claims to show. It is
+ * NOT the same as orderPlayersForGame's return value — that function ranks
+ * only its first two slots by GK fairness and fills the rest by bench-minute
+ * fairness, which is a different axis. Use this when the whole row is meant to
+ * read as "longest without a turn in goal".
+ *
+ * Returns a new array; the input is not mutated.
+ */
+export function rankByGKFairness(players, history) {
+  if (!history || history.length === 0) return [...players];
+  const { gkStints, lastGKGame } = tallyGKHistory(players, history);
+  return players
+    .map((p, i) => ({ p, i, stints: gkStints[p] || 0, last: lastGKGame[p] ?? -1 }))
+    .sort((a, b) => a.stints - b.stints || a.last - b.last || a.i - b.i)
+    .map(x => x.p);
+}
+
+/**
  * Re-orders the players array to fairly distribute GK duty and bench time
  * based on the season history.
  *
@@ -174,44 +225,24 @@ export function orderPlayersForGame(players, history, lockGK = false) {
   const n = players.length;
   if (!getSegmentConfig(n)) return players;
 
-  // Tally GK stints, last-GK-game index, and accumulated bench-minutes per player
-  const gkStints   = Object.fromEntries(players.map(p => [p, 0]));
-  const lastGKGame = Object.fromEntries(players.map(p => [p, -1]));
-  const benchMins  = Object.fromEntries(players.map(p => [p, 0]));
-  const weights    = buildBenchMinuteWeights(n);
+  const benchMins = Object.fromEntries(players.map(p => [p, 0]));
+  const weights   = buildBenchMinuteWeights(n);
 
-  history.forEach((game, gameIdx) => {
-    const segs = game.segments;
-    if (!segs) return;
-
-    const h1GK = segs.find(s => s.half === 1)?.assignment?.GK;
-    const h2GK = segs.find(s => s.half === 2)?.assignment?.GK;
-    if (h1GK && gkStints[h1GK] !== undefined) {
-      gkStints[h1GK]++;
-      lastGKGame[h1GK] = gameIdx;
-    }
-    if (h2GK && h2GK !== h1GK && gkStints[h2GK] !== undefined) {
-      gkStints[h2GK]++;
-      lastGKGame[h2GK] = gameIdx;
-    }
-
-    // Real bench minutes from the saved segments. game.players order has no
-    // relationship to rotation slots (buildSchedule reorders and shuffles
-    // internally, and mid-game edits change reality), so attributing template
-    // weights by index credits bench time to the wrong players (ISSUES.md
-    // Issue 2).
-    segs.forEach(seg => {
+  // Real bench minutes from the saved segments. game.players order has no
+  // relationship to rotation slots (buildSchedule reorders and shuffles
+  // internally, and mid-game edits change reality), so attributing template
+  // weights by index credits bench time to the wrong players (ISSUES.md
+  // Issue 2).
+  history.forEach((game) => {
+    game.segments?.forEach(seg => {
       seg.bench?.forEach(name => {
         if (name && benchMins[name] !== undefined) benchMins[name] += seg.duration || 0;
       });
     });
   });
 
-  // Sort: stints asc → lastGKGame asc (oldest first; never-GK = -1 wins) → original idx
-  const sorted = players
-    .map((p, i) => ({ p, i, stints: gkStints[p] || 0, last: lastGKGame[p] ?? -1 }))
-    .sort((a, b) => a.stints - b.stints || a.last - b.last || a.i - b.i)
-    .map(x => x.p);
+  // GK ranking: stints asc → lastGKGame asc (oldest first; never-GK wins).
+  const sorted = rankByGKFairness(players, history);
 
   const secondGKSlot = getSecondGKSlot(n);
   const result = new Array(n).fill(null);

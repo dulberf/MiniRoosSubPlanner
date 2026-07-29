@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-07-29 (Session 14 complete — on branch `ui/sideline-redesign`)*
+*Last updated: 2026-07-29 (Session 16 complete — on `main`)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/
@@ -26,7 +26,7 @@ football-sub-planner/
 │   ├── constants.js               # Positions, wristband colours, UI tokens, field layout, storage keys
 │   ├── useScale.js                # Maps the 1024px design onto the actual viewport — s(px) helper
 │   └── components/
-│       ├── InputView.jsx          # Setup screen — player list, H1/H2 GK picker dropdowns, import/export
+│       ├── InputView.jsx          # Setup screen (3a) — roster chips, H1/H2 GK chip rows, pip strip, import
 │       ├── TeamSheetView.jsx      # Live game screen — header/pips/pitch/bench rail/action stack
 │       ├── SeasonView.jsx         # Season tracker — game history, fairness stats, edit modal
 │       ├── FieldView.jsx          # Interactive field diagram with player tokens
@@ -179,6 +179,93 @@ Dedup key: `date + JSON.stringify(players) + label`.
 
 ## Session History
 
+### Session 16 — Design screens 3a (match setup) + 4a (honours) ✅
+**Source:** `Football app sideline interface v3.zip` — the third export of the design bundle.
+v3 is the first one that carries renders for the TURN 3 / TURN 4 screens; v2's README described
+them but shipped a `Sideline UI.dc.html` byte-identical to v1's, containing only TURN 1–2.
+Scope agreed with the coach: **3a and 4a only.** 3b/3c/3d and 4b remain to build.
+
+**⚠️ The renders draw invented period durations — do not build to them.** 3a's pip strip shows an
+11-player game as P1 0–9, P2 9–17, P3 17–25; the real `getSegmentConfig(11)` is `[5,10,10,10,10,5]`,
+so it is 0–5, 5–15, 15–25. 3d has the same problem ("MINUTE 17 TO 25"). The implementation reads
+`config.durs` and is correct; verified in the browser at 12 players (0–10 · 10–25 · HT · 25–35 ·
+35–50) and 10 players (ten 5-min periods, HT after P5), both matching the table above.
+
+**3a — Match setup (`InputView.jsx`, full rewrite).** Navy chrome and `UI` tokens; the ✅/❌ emoji
+roster toggles become navy-fill chips in a 4-column grid; the squad-count badge is the only status
+colour on the screen; the amber game-plan card becomes the live screen's period-pip strip plus three
+fact tiles. The two GK `<select>`s — the last dropdowns in the app — become chip rows.
+
+Three corrections were applied to the design's drop-in before it went in:
+1. **The drop-in's GK ordering was dead code.** It ranked players by `g.gkH1` / `g.gkH2` on saved
+   games. **Those fields do not exist** — GK history lives in `segment.half` + `assignment.GK`. The
+   sort was a silent no-op and the row rendered in squad order under a heading promising fairness
+   ordering. See the new `rankByGKFairness` below.
+2. **Text floors** were at 11/12/13px (below the 15px minimum on the coach's 810px iPad). All ≥15.
+3. **"Same as 1st half" could not work** — see the `gkFullGame` fix below.
+
+Also changed from the drop-in: the second-half chip row **excludes whoever is keeping goal in the
+first**, because picking them there means something specific (the full 50) and that gets its own
+chip rather than being a silent collision. The absent-player hint names who is out
+("Cara, Ivy out today — tap to add anyone who turns up late").
+
+**`scheduler.js` — new export `rankByGKFairness(players, history)`.** Ranks the *whole* list by who
+is most overdue a turn in goal: stints asc → longest-since asc → stable order. **This is not
+`orderPlayersForGame`.** That function ranks only its first two slots by GK fairness and fills the
+rest by *bench-minute* fairness (`scheduler.js`, the `emptySlots` / `byBench` block) — a different
+axis. Using it for the chip row put the wrong names in chips 3 and 4, which are half of what the
+coach sees before the "Everyone else ▾" expander. `orderPlayersForGame` now calls the new helper
+for its own GK ranking, so there is one implementation, and a shared `tallyGKHistory` does the
+history walk. **No behaviour change to `orderPlayersForGame`'s output** — 17/17 pre-existing tests
+pass unchanged.
+
+**The full-game keeper was unselectable, and had been since Session 6.** The auto-suggest effect
+kept a chosen `gkH2` only when `gkH2 !== finalH1`, so setting them equal was overwritten by the
+oracle on the next render. The old `<select>`'s "same as H1 — full game" option was clobbered
+identically — this was **not** a regression from the new screen, which merely made it visible.
+Fixed with an explicit `gkFullGame` boolean in `App.jsx`:
+- The flag is what separates a *deliberate* full-game keeper from the *accidental* H1/H2 collapse
+  the Session-6 collision guard exists to prevent. Without it the two are indistinguishable: tapping
+  X in the H1 row while the oracle already has X in H2 would silently hand one child 50 minutes in
+  goal. **Do not "simplify" this by dropping the `!== finalH1` guard on its own.**
+- Applied in both `handleReorder` and the auto-suggest effect; persisted through
+  `saveInProgress`/resume so a resumed full-game match isn't re-oracled.
+- Picking a named 2nd-half keeper clears the flag (handled in `InputView`, or the effect would force
+  it straight back).
+- **Verified end-to-end:** chip sticks → "Grace keeps goal for the full 50 minutes" → fact tile flips
+  to "50 min in goal" → `buildSchedule` returns Grace as GK in all four segments → `calcStats` gives
+  her 50. That path was unreachable before.
+
+**4a — Honours (`TeamSheetView.jsx`), replaces 2c.** The green block asked "who has never had
+either", which is only a real question for the first few rounds; on the real 11-game season every
+player has an honour and the block that carried the screen **rendered empty** (noted as expected in
+Session 14 — it wasn't). The block now asks **who has gone longest without one**, which works
+identically in round 1 and round 30 because "never" sorts ahead of any round number.
+- `eligibleForHonour` / `honouredSorted` replaced by `overdueOrder`, `dueNext` (top 4 *playing
+  today*) and `everyoneElse`. `roundsSince(p, caps)` renders "never had one" / "last round" /
+  "N rounds ago" — an argument, where the old `last: R7` was a database field.
+- The **save modal's chip rows (2d) use the same shortlist**, so the two screens agree.
+- **The empty state was deleted, deliberately.** "No games saved yet" now contradicts a shortlist
+  that reads NEVER HAD ONE for everyone, which is the correct round-1 answer.
+- ⚠️ `overdueOrder` must not be used with `Array.prototype.sort` on the `players` prop directly —
+  it is React state. The design README's snippet does exactly that; the implementation copies first.
+
+**Verified in the browser at 810 × 1080 against the real 11-game season** (seeded from
+`teamsheet-season-2026-07-06-corrected.json`), against a hand-computed expectation:
+- 12 playing → shortlist Cara 7 · Ellery 5 · Clara 4 · Grace 4; then Ivy/Lyla 3, Gen/Maddy 2,
+  Luella/Noa 1, Avahna/Imogen last round. Matches by hand.
+- Cara and Ivy marked out → **Cara correctly drops out of the shortlist** (it promises "playing
+  today"), Ellery leads, and both render dashed at 0.55 opacity with "not playing today".
+- No console errors. **24/24 tests** (17 existing + 7 new in `test/gk-fairness.test.mjs`).
+
+**Files touched:** `src/scheduler.js`, `src/components/InputView.jsx`, `src/App.jsx`,
+`src/components/TeamSheetView.jsx`, `test/gk-fairness.test.mjs` (new), `team-sheet-offline.html`
+(rebuilt), `HANDOFF.md`.
+
+**Still to build from the v3 bundle:** 3b squad sheet, 3c player-off, 3d minutes prompt (one flow —
+3b deletes the modals 3c replaces, so splitting them leaves the app half-migrated), then 4b
+landscape, then the accessibility pass.
+
 ### Session 15 — Service worker: offline kept, stale-forever fixed ✅
 **The constraint that drove every decision here:** the app is used on a football field with **no
 wifi**. It must open with no network, every time. That is not negotiable, and it is why the worker
@@ -248,8 +335,9 @@ today's squad render dashed at 55% with "not playing today".
 - New `honours` memo in `TeamSheetView` — `{ potm, captain, lastRound }` per player, where
   `lastRound` is the 1-based index of the most recent game they were POTW or captain.
 - ⚠️ With the real 11-game season loaded, **every player has already had an honour**, so the green
-  block correctly renders empty. That is the right answer, not a bug — the coach has rotated
-  honours perfectly. The ordering is what carries the information in that case.
+  block rendered empty. This was recorded here as "the right answer, not a bug". **It was a bug** —
+  an empty centrepiece answers nothing. **Superseded by 4a in Session 16**, which changes the
+  question to "longest without one" so the block is never empty.
 
 **2d Save** (`TeamSheetView`): both `<select>`s replaced by chip rows via `honourChipRow()`. Eligible
 ("never had one") players show by default with an "Everyone else ▾" expander; when nobody is eligible

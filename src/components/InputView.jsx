@@ -1,222 +1,370 @@
+// Screen 3a — Match Setup, in the Session 13 sideline language.
+//
+//  · Navy chrome + UI tokens instead of the blue gradient card and ~6 hues.
+//  · The two GK <select>s become chip rows — the last dropdowns in the app —
+//    ordered by who is most overdue a turn in goal, with an "Everyone else"
+//    expander. Same component idiom as the POTW/captain rows in the save modal.
+//  · The amber "game plan preview" becomes the period-pip strip from the live
+//    screen, so setup rehearses the screen you stare at all game.
+//  · Emoji toggles gone. Only the squad-count badge carries a status colour, so
+//    a short squad is the one thing that catches the eye.
+//  · Everything sized through s() off DESIGN_WIDTH 1024, like the other views.
+
 import { useMemo, useState } from 'react';
-import { getSegmentConfig } from '../scheduler.js';
-import { POS_LABEL, DEFAULT_PLAYERS, MIN_PLAYERS, MAX_PLAYERS } from '../constants.js';
+import { getSegmentConfig, rankByGKFairness } from '../scheduler.js';
+import { DEFAULT_PLAYERS, MIN_PLAYERS, MAX_PLAYERS, UI } from '../constants.js';
+import useScale from '../useScale.js';
 
 export default function InputView({
   playersText, setPlayersText,
   gkH1, setGkH1,
   gkH2, setGkH2,
+  gkFullGame, setGkFullGame,
   onGenerate, onReorder, onGoSeason,
   seasonGameCount,
   onImport, importMsg,
+  seasonGames = [],
 }) {
+  const { s } = useScale();
   const [showRawText, setShowRawText] = useState(false);
+  const [gk1Expanded, setGk1Expanded] = useState(false);
+  const [gk2Expanded, setGk2Expanded] = useState(false);
 
-  // Parse current active players
-  const activePlayers = useMemo(() =>
-    playersText.split('\n').map(l => l.trim()).filter(Boolean),
+  const activePlayers = useMemo(
+    () => playersText.split('\n').map(l => l.trim()).filter(Boolean),
     [playersText]
   );
-  
-  // Build a Master Roster
+
   const masterRoster = useMemo(() => {
     const defaults = DEFAULT_PLAYERS.split('\n').map(l => l.trim());
-    const allNames = [...defaults, ...activePlayers];
-    return [...new Set(allNames)].filter(Boolean).sort();
+    return [...new Set([...defaults, ...activePlayers])].filter(Boolean).sort();
   }, [activePlayers]);
 
-  const count    = activePlayers.length;
-  const benchSz  = count > 9 ? count - 9 : 0;
-  const shortSz  = count < 9 ? 9 - count : 0;
-  const isValid  = count >= MIN_PLAYERS && count <= MAX_PLAYERS;
-
-  const config   = getSegmentConfig(count);
-
-  const subTimes = useMemo(() => {
-    if (!config || benchSz === 0) return [];
-    const times = [];
-    let t = 0;
-    config.durs.forEach((d, i) => {
-      if (i > 0) times.push(t === 25 ? 'HT(25)' : `${t}min`);
-      t += d;
-    });
-    return times;
-  }, [config, benchSz]);
-
+  const count   = activePlayers.length;
+  const benchSz = count > 9 ? count - 9 : 0;
+  const shortSz = count < 9 ? 9 - count : 0;
+  const isValid = count >= MIN_PLAYERS && count <= MAX_PLAYERS;
+  const config  = getSegmentConfig(count);
   const lockGKEffective = !!gkH1 && gkH1 === gkH2;
 
+  // Period boundaries for the pip strip: [{label, from, to, half}]. Read off
+  // config.durs, never hardcoded — the design renders show an even split, but
+  // an 11-player game is really 5/10/10 | 10/10/5.
+  const periods = useMemo(() => {
+    if (!config) return [];
+    let t = 0;
+    return config.durs.map((d, i) => {
+      const p = { label: `P${i + 1}`, from: t, to: t + d, half: t < 25 ? 1 : 2 };
+      t += d;
+      return p;
+    });
+  }, [config]);
+
+  // Who is most overdue a turn in goal. rankByGKFairness is the whole-list
+  // version of the ordering — orderPlayersForGame ranks only its first two
+  // slots this way and fills the rest by bench-minute fairness, which would
+  // put the wrong names in chips 3 and 4 under a heading that promises
+  // "longest without a turn".
+  const gkOrder = useMemo(
+    () => rankByGKFairness(activePlayers, seasonGames),
+    [activePlayers, seasonGames]
+  );
+
+  const absent = useMemo(
+    () => masterRoster.filter(n => !activePlayers.includes(n)),
+    [masterRoster, activePlayers]
+  );
+
   const togglePlayer = (name) => {
-    const isPlaying = activePlayers.includes(name);
-    let newPlayers;
-    if (isPlaying) {
-      newPlayers = activePlayers.filter(p => p !== name);
-    } else {
-      newPlayers = [...activePlayers, name];
-    }
-    setPlayersText(newPlayers.join('\n'));
+    setPlayersText(
+      (activePlayers.includes(name)
+        ? activePlayers.filter(p => p !== name)
+        : [...activePlayers, name]
+      ).join('\n')
+    );
   };
 
-  const badge = count < MIN_PLAYERS ? { text: `${count} · need ${MIN_PLAYERS - count} more`, bg: '#fee2e2', fg: '#b91c1c', border: '#f87171' }
-              : count > 12          ? { text: `${count} · max 12`, bg: '#fef3c7', fg: '#b45309', border: '#92400e' }
-              : count < 9           ? { text: `${count} players · short (${shortSz}) ⚠️`, bg: '#fffbeb', fg: '#b45309', border: '#f59e0b' }
-              : { text: `${count} players${benchSz > 0 ? ` · ${benchSz} bench` : ' · full squad'} ✓`, bg: '#ecfdf5', fg: '#065f46', border: '#059669' };
+  const badge =
+    count < MIN_PLAYERS ? { text: `${count} · NEED ${MIN_PLAYERS - count} MORE`, tint: '#fdecec', fg: UI.stop }
+  : count > MAX_PLAYERS ? { text: `${count} · MAX ${MAX_PLAYERS}`,               tint: UI.warnTint, fg: UI.warn }
+  : count < 9           ? { text: `${count} PLAYING · SHORT ${shortSz}`,         tint: UI.warnTint, fg: UI.warn }
+  :                       { text: `${count} PLAYING`,                            tint: UI.goTint,   fg: UI.go };
+
+  // Named, so the coach can see the suggestion is reasoned rather than random.
+  const gkHint = () => {
+    if (seasonGameCount === 0) return 'First game of the season — pick anyone.';
+    const [a, b] = gkOrder;
+    if (a && b) return `Suggested from history — ${a} and ${b} have gone longest without a turn.`;
+    return 'Longest since a turn in goal, first. Override freely.';
+  };
+
+  const absentHint = absent.length === 0
+    ? "Everyone's in. Tap a name to mark them out."
+    : `${absent.slice(0, 3).join(', ')}${absent.length > 3 ? ` and ${absent.length - 3} more` : ''} out today — tap to add anyone who turns up late.`;
+
+  // ── shared styles ─────────────────────────────────────────────────────────
+  const sectionLabel = {
+    fontSize: Math.max(15, s(16)), fontWeight: 900, letterSpacing: s(2),
+    color: UI.label, textTransform: 'uppercase',
+  };
+  const card = {
+    background: '#fff', border: `3px solid ${UI.blueLine}`,
+    borderRadius: s(20), padding: `${s(24)}px ${s(26)}px`,
+  };
+  const chip = (selected, muted) => ({
+    background: selected ? UI.navy : '#fff',
+    border: `3px solid ${selected ? UI.navy : UI.blueLine}`,
+    borderRadius: s(12), padding: `${s(11)}px ${s(20)}px`,
+    fontSize: Math.max(16, s(22)), fontWeight: 800,
+    color: selected ? '#fff' : muted ? UI.label : UI.navy,
+    cursor: 'pointer', fontFamily: 'inherit',
+  });
+
+  // isH2: the second-half row excludes whoever is keeping goal in the first,
+  // because picking them there means something specific — the full 50 minutes —
+  // and that gets its own chip rather than being a silent collision.
+  const gkRow = (value, onPick, expanded, setExpanded, isH2) => {
+    const pool  = isH2 ? gkOrder.filter(p => p !== gkH1) : gkOrder;
+    const shown = expanded ? pool : pool.slice(0, 4);
+    const list  = value && value !== gkH1 && !shown.includes(value) ? [value, ...shown] : shown;
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: s(10) }}>
+        {list.map(p => (
+          <button key={p} type="button" onClick={() => onPick(value === p ? null : p)} style={chip(value === p)}>
+            {p}{value === p ? ' ✓' : ''}
+          </button>
+        ))}
+        {!expanded && pool.length > 4 && (
+          <button type="button" onClick={() => setExpanded(true)} style={chip(false, true)}>Everyone else ▾</button>
+        )}
+        {isH2 && gkH1 && (
+          <button
+            type="button"
+            onClick={() => setGkFullGame(!lockGKEffective)}
+            style={{
+              ...chip(lockGKEffective),
+              background: lockGKEffective ? UI.navy : UI.page,
+              color: lockGKEffective ? '#fff' : UI.bodyText,
+            }}>
+            Same as 1st half{lockGKEffective ? ' ✓' : ''}
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f0f6ff', fontFamily: "system-ui, sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ width: '100%', maxWidth: 480, background: '#ffffff', borderRadius: 24, overflow: 'hidden', boxShadow: '0 20px 60px rgba(15,45,90,0.1)' }}>
+    <div style={{
+      minHeight: '100vh', background: UI.page, color: UI.navy,
+      fontFamily: 'system-ui, "Segoe UI", sans-serif',
+      fontVariantNumeric: 'tabular-nums',
+      display: 'flex', flexDirection: 'column',
+    }}>
 
-        {/* Header */}
-        <div style={{ background: 'linear-gradient(135deg, #1d6fcf 0%, #0f2d5a 100%)', padding: '32px 28px 24px', textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 8 }}>⚽</div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, color: '#fff', letterSpacing: -0.5 }}>Match Setup</h1>
-          <p style={{ margin: '8px 0 0', color: '#c7daf7', fontSize: 14, fontWeight: 600 }}>9v9 · 2 × 25 min · Rolling Subs</p>
+      {/* Header */}
+      <header style={{
+        background: UI.navy, minHeight: s(96), flexShrink: 0,
+        padding: `${s(12)}px ${s(22)}px`, display: 'flex',
+        alignItems: 'center', justifyContent: 'space-between', gap: s(16), flexWrap: 'wrap',
+      }}>
+        <div>
+          <div style={{ fontSize: Math.max(24, s(34)), fontWeight: 800, color: '#fff', letterSpacing: -0.5, lineHeight: 1.1 }}>
+            Match setup
+          </div>
+          <div style={{ fontSize: Math.max(15, s(15)), fontWeight: 800, color: UI.onNavyMuted, letterSpacing: s(2) }}>
+            9V9 · 2 × 25 MIN · ROLLING SUBS
+          </div>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: s(10) }}>
+          <button type="button" onClick={onGoSeason} style={{
+            border: `2px solid ${UI.onNavyBorder}`, borderRadius: s(10), background: 'transparent',
+            padding: `${s(14)}px ${s(20)}px`, fontSize: Math.max(16, s(18)), fontWeight: 800,
+            color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
+          }}>SEASON · {seasonGameCount}</button>
+          <label style={{
+            border: `2px solid ${UI.onNavyBorder}`, borderRadius: s(10),
+            padding: `${s(14)}px ${s(20)}px`, fontSize: Math.max(16, s(18)), fontWeight: 800,
+            color: '#fff', cursor: 'pointer',
+          }}>
+            IMPORT
+            <input type="file" accept=".json" onChange={onImport} style={{ display: 'none' }} />
+          </label>
+        </div>
+      </header>
 
-        <div style={{ padding: 24 }}>
-          
-          {/* Top Action Bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-             <button onClick={onGoSeason} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#1d6fcf', fontSize: 14, fontWeight: 800 }}>
-                📅 View Season ({seasonGameCount})
-              </button>
-              
-              <label style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#1d6fcf', fontSize: 14, fontWeight: 800, display: 'flex', alignItems: 'center' }}>
-                📥 Import
-                <input type="file" accept=".json" onChange={onImport} style={{ display: 'none' }} />
-              </label>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: s(22), padding: `${s(26)}px ${s(30)}px 0`, minHeight: 0 }}>
+
+        {importMsg && (
+          <div style={{
+            padding: s(14), borderRadius: s(12), textAlign: 'center',
+            background: importMsg.type === 'err' ? '#fdecec' : UI.goTint,
+            color: importMsg.type === 'err' ? UI.stop : UI.go,
+            fontSize: Math.max(15, s(20)), fontWeight: 800,
+          }}>{importMsg.msg}</div>
+        )}
+
+        {/* Squad */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: s(12), marginBottom: s(14) }}>
+            <div style={sectionLabel}>Who turned up</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: s(10) }}>
+              {isValid && (
+                <div style={{ fontSize: Math.max(16, s(17)), fontWeight: 800, color: UI.bodyText }}>
+                  {benchSz === 0 ? 'No subs needed' : `${benchSz} on the bench each period`}
+                </div>
+              )}
+              <div style={{
+                background: badge.tint, border: `3px solid ${badge.fg}`, borderRadius: 999,
+                padding: `${s(7)}px ${s(18)}px`, fontSize: Math.max(16, s(20)), fontWeight: 900, color: badge.fg,
+              }}>{badge.text}</div>
+            </div>
           </div>
 
-          {importMsg && (
-            <div style={{ marginBottom: 16, padding: '12px', borderRadius: 10, background: importMsg.type === 'err' ? '#fee2e2' : '#ecfdf5', color: importMsg.type === 'err' ? '#b91c1c' : '#059669', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>
-              {importMsg.msg}
-            </div>
-          )}
-
-          {/* Player count badge */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottom: '3px solid #e2ecfc' }}>
-            <div style={{ fontSize: 16, fontWeight: 900, color: '#0f2d5a', letterSpacing: 0.5 }}>TODAY'S SQUAD</div>
-            <div style={{ fontSize: 14, fontWeight: 800, padding: '6px 14px', borderRadius: 999, background: badge.bg, color: badge.fg, border: `2px solid ${badge.border}` }}>
-              {badge.text}
-            </div>
-          </div>
-
-          {/* FAT FINGER ROSTER TOGGLES */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: s(12) }}>
             {masterRoster.map(name => {
-              const isPlaying = activePlayers.includes(name);
+              const on = activePlayers.includes(name);
               return (
-                <button 
-                  key={name}
-                  onClick={() => togglePlayer(name)}
-                  style={{
-                    flex: '1 1 calc(33% - 10px)', minWidth: 100,
-                    padding: '12px 8px', borderRadius: 12,
-                    border: `3px solid ${isPlaying ? '#059669' : '#cbd5e1'}`,
-                    background: isPlaying ? '#ecfdf5' : '#f8fafc',
-                    color: isPlaying ? '#065f46' : '#64748b',
-                    fontSize: 16, fontWeight: 800, cursor: 'pointer',
-                    transition: 'all 0.1s',
-                    boxShadow: isPlaying ? '0 4px 12px rgba(5,150,105,0.15)' : 'none'
-                  }}
-                >
-                  {isPlaying ? '✅' : '❌'} {name}
+                <button key={name} type="button" onClick={() => togglePlayer(name)} style={{
+                  height: s(78), borderRadius: s(14),
+                  background: on ? UI.navy : '#fff',
+                  border: `3px solid ${on ? UI.navy : UI.blueLine}`,
+                  color: on ? '#fff' : UI.label,
+                  fontSize: Math.max(18, s(26)), fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: s(10),
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  {name}{on && <span style={{ fontSize: Math.max(16, s(20)) }}>✓</span>}
                 </button>
               );
             })}
           </div>
 
-          {/* Hidden Raw Text Toggle for new players */}
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <button onClick={() => setShowRawText(!showRawText)} style={{ background: 'none', border: 'none', color: '#7a96b0', fontSize: 13, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}>
-              {showRawText ? 'Hide Raw List' : '✏️ Add New Player / Edit Raw List'}
-            </button>
+          <div style={{ marginTop: s(12), display: 'flex', alignItems: 'center', gap: s(12), flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => setShowRawText(!showRawText)} style={{
+              border: `3px dashed ${UI.blueLine}`, borderRadius: s(14), background: 'transparent',
+              padding: `${s(12)}px ${s(22)}px`, fontSize: Math.max(16, s(20)), fontWeight: 800,
+              color: UI.label, cursor: 'pointer', fontFamily: 'inherit',
+            }}>{showRawText ? 'DONE' : '+ ADD A PLAYER'}</button>
+            <div style={{ fontSize: Math.max(16, s(17)), fontWeight: 600, color: UI.label }}>
+              {absentHint}
+            </div>
           </div>
 
           {showRawText && (
-             <textarea
+            <textarea
               value={playersText}
               onChange={e => setPlayersText(e.target.value)}
-              placeholder="One name per line..."
+              placeholder="One name per line…"
               rows={8}
-              style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', border: '3px solid #cbd5e1', borderRadius: 12, padding: '16px', color: '#0f2d5a', fontSize: 16, fontWeight: 600, lineHeight: 1.8, fontFamily: 'inherit', resize: 'vertical', outline: 'none', marginBottom: 20 }}
+              style={{
+                width: '100%', boxSizing: 'border-box', marginTop: s(12),
+                background: '#fff', border: `3px solid ${UI.blueLine}`, borderRadius: s(12),
+                padding: s(16), color: UI.navy, fontSize: Math.max(16, s(22)), fontWeight: 700,
+                lineHeight: 1.7, fontFamily: 'inherit', resize: 'vertical', outline: 'none',
+              }}
             />
           )}
+        </div>
 
-          {/* GK picker */}
-          {isValid && (
-            <div style={{ background: '#f8fafc', border: '3px solid #e2ecfc', borderRadius: 16, padding: 16, marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginBottom: 12 }}>🧤 GOALKEEPERS</div>
-
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#64748b', marginBottom: 6, letterSpacing: 0.5 }}>1ST HALF</label>
-                <select
-                  value={gkH1 || ''}
-                  onChange={e => setGkH1(e.target.value || null)}
-                  style={{ width: '100%', padding: '12px', borderRadius: 10, border: '2px solid #cbd5e1', fontSize: 16, fontWeight: 700, background: '#fff', color: '#0f2d5a', outline: 'none', cursor: 'pointer', boxSizing: 'border-box' }}>
-                  <option value="">— Pick GK —</option>
-                  {activePlayers.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#64748b', marginBottom: 6, letterSpacing: 0.5 }}>2ND HALF</label>
-                <select
-                  value={gkH2 || ''}
-                  onChange={e => setGkH2(e.target.value || null)}
-                  style={{ width: '100%', padding: '12px', borderRadius: 10, border: '2px solid #cbd5e1', fontSize: 16, fontWeight: 700, background: '#fff', color: '#0f2d5a', outline: 'none', cursor: 'pointer', boxSizing: 'border-box' }}>
-                  <option value="">— Pick GK —</option>
-                  {gkH1 && <option value={gkH1}>{gkH1} (same as H1 — full game)</option>}
-                  {activePlayers.filter(p => p !== gkH1).map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-
-              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: '#4a6b8a', lineHeight: 1.5 }}>
-                {lockGKEffective
-                  ? '💡 Same player both halves — GK plays the full 50 minutes.'
-                  : seasonGameCount > 0 ? '💡 Suggested from history. Override if needed.' : '💡 Pre-filled with the first two players.'}
+        {/* Goalkeepers */}
+        {isValid && (
+          <div style={card}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: s(12), marginBottom: s(16) }}>
+              <div style={sectionLabel}>Goalkeeper</div>
+              <div style={{ fontSize: Math.max(16, s(17)), fontWeight: 700, color: UI.bodyText, textAlign: 'right' }}>
+                {gkHint()}
               </div>
             </div>
-          )}
 
-          {/* Game plan preview */}
-          {isValid && (
-            <div style={{ background: '#fffbeb', border: '3px solid #fcd34d', borderRadius: 16, padding: '16px', fontSize: 14, marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: '#b45309', letterSpacing: 1, marginBottom: 12 }}>GAME PLAN PREVIEW</div>
-              {[
-                ['🔄', 'Subs', benchSz === 0 ? 'No subs needed' : subTimes.join('  ·  ')],
-                ['⚖️', 'Time', benchSz === 0 ? 'All play 50 min' : lockGKEffective ? `GK: 50m · Others: ~${Math.round(400 / (count - 1))}m` : `~${Math.round(450 / count)}m each`],
-              ].map(([icon, label, value]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '2px solid #fde68a', gap: 8 }}>
-                  <span style={{ color: '#92400e', fontWeight: 800 }}>{icon} {label}</span>
-                  <span style={{ color: '#b45309', fontWeight: 700, textAlign: 'right' }}>{value}</span>
+            <div style={{ ...sectionLabel, fontSize: Math.max(15, s(15)), letterSpacing: s(1.5), marginBottom: s(10) }}>1st half</div>
+            <div style={{ marginBottom: s(20) }}>
+              {gkRow(gkH1, setGkH1, gk1Expanded, setGk1Expanded, false)}
+            </div>
+
+            <div style={{ ...sectionLabel, fontSize: Math.max(15, s(15)), letterSpacing: s(1.5), marginBottom: s(10) }}>2nd half</div>
+            {gkRow(
+              lockGKEffective ? null : gkH2,
+              // Picking a named 2nd-half keeper cancels the full-game choice —
+              // otherwise App's auto-suggest effect would force it straight back.
+              (p) => { setGkFullGame(false); setGkH2(p); },
+              gk2Expanded, setGk2Expanded, true
+            )}
+
+            {lockGKEffective && (
+              <div style={{ marginTop: s(12), fontSize: Math.max(16, s(17)), fontWeight: 700, color: UI.bodyText }}>
+                {gkH1} keeps goal for the full 50 minutes.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* The plan this makes — same pip strip as the live screen */}
+        {isValid && periods.length > 0 && (
+          <div>
+            <div style={{ ...sectionLabel, marginBottom: s(12) }}>The plan this makes</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: s(8), marginBottom: s(12) }}>
+              {periods.map((p, i) => (
+                <div key={p.label} style={{ display: 'contents' }}>
+                  {i > 0 && periods[i - 1].half === 1 && p.half === 2 && (
+                    <div style={{
+                      width: s(46), height: s(56), borderRadius: s(8), background: UI.track,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: Math.max(15, s(14)), fontWeight: 900, color: UI.label,
+                    }}>HT</div>
+                  )}
+                  <div style={{
+                    flex: 1, minHeight: s(56), padding: `${s(4)}px 0`, borderRadius: s(8), background: '#fff',
+                    border: `2px solid ${UI.blueLine}`, color: UI.bodyText,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <div style={{ fontSize: Math.max(16, s(17)), fontWeight: 900, lineHeight: 1.1 }}>{p.label}</div>
+                    <div style={{ fontSize: Math.max(15, s(13)), fontWeight: 800, color: UI.label, lineHeight: 1.1 }}>{p.from}–{p.to}</div>
+                  </div>
                 </div>
               ))}
             </div>
-          )}
 
-          {/* Action buttons - ONE SMART BUTTON */}
-          <button
-            onClick={() => {
-              if (seasonGameCount > 0) {
-                onReorder(); // Balances using history AND generates the board
-              } else {
-                onGenerate(); // Generates straight away (first game of season)
-              }
-            }}
-            disabled={!isValid}
-            style={{ width: '100%', padding: 20,
-                     background: isValid ? '#1d6fcf' : '#e2ecfc',
-                     border: isValid ? 'none' : '3px solid #cbd5e1',
-                     borderRadius: 16, cursor: isValid ? 'pointer' : 'not-allowed',
-                     color: isValid ? '#fff' : '#64748b', fontSize: 20, fontWeight: 900,
-                     boxShadow: isValid ? '0 8px 24px rgba(29,111,207,0.3)' : 'none',
-                     transition: 'all 0.2s' }}>
-            {isValid 
-              ? (seasonGameCount > 0 ? 'BALANCE & GENERATE BOARD →' : 'GENERATE TACTICAL BOARD →') 
-              : `ADD ${MIN_PLAYERS - count} MORE PLAYERS`}
-          </button>
+            <div style={{ display: 'flex', gap: s(12), flexWrap: 'wrap' }}>
+              {[
+                ['Every outfield player',
+                  benchSz === 0 ? 'All 50 min' : lockGKEffective
+                    ? `~${Math.round(400 / (count - 1))} min`
+                    : `~${Math.round(450 / count)} min`],
+                ['Each keeper', lockGKEffective ? '50 min in goal' : '25 min in goal'],
+                ['Balanced against', `${seasonGameCount} round${seasonGameCount === 1 ? '' : 's'} played`],
+              ].map(([label, value]) => (
+                <div key={label} style={{
+                  flex: '1 1 30%', background: '#fff', border: `2px solid ${UI.blueLine}`,
+                  borderRadius: s(12), padding: `${s(14)}px ${s(18)}px`,
+                }}>
+                  <div style={{ ...sectionLabel, fontSize: Math.max(15, s(14)), letterSpacing: s(1.5), marginBottom: s(4) }}>{label}</div>
+                  <div style={{ fontSize: Math.max(20, s(26)), fontWeight: 800, color: UI.navy }}>{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
-        </div>
+      {/* Primary action */}
+      <div style={{ padding: `${s(20)}px ${s(30)}px ${s(26)}px`, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={() => (seasonGameCount > 0 ? onReorder() : onGenerate())}
+          disabled={!isValid}
+          style={{
+            width: '100%', height: s(92), borderRadius: s(16), border: 'none',
+            background: isValid ? UI.navy : UI.track,
+            color: isValid ? '#fff' : UI.label,
+            fontSize: Math.max(20, s(28)), fontWeight: 900, letterSpacing: 0.5,
+            cursor: isValid ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+          }}>
+          {isValid
+            ? (seasonGameCount > 0 ? 'BALANCE & GENERATE BOARD →' : 'GENERATE BOARD →')
+            : count > MAX_PLAYERS
+              ? `TOO MANY — REMOVE ${count - MAX_PLAYERS}`
+              : `ADD ${MIN_PLAYERS - count} MORE PLAYER${MIN_PLAYERS - count === 1 ? '' : 'S'}`}
+        </button>
       </div>
     </div>
   );

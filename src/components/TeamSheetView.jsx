@@ -146,27 +146,48 @@ export default function TeamSheetView({
     return map;
   }, [players, seasonGames]);
 
-  // Never had either AND playing today. This is the list that actually answers
-  // "who should get it?" — the old sheet was alphabetical and answered nothing.
+  // Never had either AND playing today. Still used for the save modal's helper
+  // line, but it is no longer what the honours sheet leads with — see below.
   const eligibleForHonour = useMemo(
     () => players.filter(p => honours[p] && honours[p].potm === 0 && honours[p].captain === 0),
     [players, honours]
   );
 
-  // Already honoured: today's squad first, then longest-since-last-honour first,
-  // so the most overdue player is nearest the top.
-  const honouredSorted = useMemo(() => {
+  // Screen 4a. The sheet used to ask "who has never had one", which is only a
+  // real question for the first few rounds — by round 11 every player has an
+  // honour and the block that carried the whole screen rendered empty. Asking
+  // "who has gone longest without one" works identically in round 1 (everyone
+  // is "never") and round 30, because never sorts ahead of any number.
+  // lastRound is null for never-honoured, so `?? 0` puts them first.
+  const overdueOrder = useCallback((a, b) => {
     const squad = new Set(players);
-    return Object.keys(honours)
-      .filter(p => honours[p].potm > 0 || honours[p].captain > 0)
-      .sort((a, b) => {
-        const aIn = squad.has(a), bIn = squad.has(b);
-        if (aIn !== bIn) return aIn ? -1 : 1;
-        const ar = honours[a].lastRound ?? 0, br = honours[b].lastRound ?? 0;
-        if (ar !== br) return ar - br;
-        return a.localeCompare(b);
-      });
-  }, [honours, players]);
+    const aIn = squad.has(a), bIn = squad.has(b);
+    if (aIn !== bIn) return aIn ? -1 : 1;
+    const ar = honours[a]?.lastRound ?? 0, br = honours[b]?.lastRound ?? 0;
+    if (ar !== br) return ar - br;
+    return a.localeCompare(b);
+  }, [players, honours]);
+
+  // The four most overdue players who are actually here today.
+  const dueNext = useMemo(
+    () => [...players].sort(overdueOrder).slice(0, 4),
+    [players, overdueOrder]
+  );
+
+  // Everyone the shortlist didn't cover: today's squad first, then absentees.
+  const everyoneElse = useMemo(
+    () => Object.keys(honours).filter(p => !dueNext.includes(p)).sort(overdueOrder),
+    [honours, dueNext, overdueOrder]
+  );
+
+  // "9 rounds ago" reads as an argument; "last: R2" reads as a database field.
+  const roundsSince = useCallback((p, caps) => {
+    const lr = honours[p]?.lastRound;
+    if (lr == null) return caps ? 'NEVER HAD ONE' : 'never had one';
+    const diff = seasonGames.length - lr;
+    if (diff <= 0) return caps ? 'LAST ROUND' : 'last round';
+    return caps ? `${diff} ROUND${diff === 1 ? '' : 'S'} AGO` : `${diff} round${diff === 1 ? '' : 's'} ago`;
+  }, [honours, seasonGames]);
 
   // Open save modal and pre-populate scores + captain suggestion
   const openSaveModal = useCallback((initialScore) => {
@@ -608,13 +629,12 @@ export default function TeamSheetView({
   // the whole point is that the fair answer is the visible one — with an
   // "Everyone else" escape to the full squad.
   const honourChipRow = (value, setValue, expanded, setExpanded) => {
-    const showAll = expanded || eligibleForHonour.length === 0;
-    // When everyone has already been honoured there is no "fair" shortlist, so
-    // lead with whoever has gone longest without one.
-    const byOverdue = [...players].sort(
-      (a, b) => (honours[a]?.lastRound ?? 0) - (honours[b]?.lastRound ?? 0)
-    );
-    const base = showAll ? byOverdue : eligibleForHonour;
+    // 4a's reframing applies here too: lead with longest-since-an-honour, not
+    // never-had-one. The "never" players still come first — never sorts ahead
+    // of any round number — but the row keeps working once nobody is left.
+    const byOverdue = [...players].sort(overdueOrder);
+    const showAll = expanded || byOverdue.length <= 4;
+    const base = showAll ? byOverdue : byOverdue.slice(0, 4);
     const shown = value && !base.includes(value) ? [value, ...base] : base;
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: s(10) }}>
@@ -1605,44 +1625,55 @@ export default function TeamSheetView({
         );
       })()}
 
-      {/* ══ Honours sheet (2c) ══ */}
+      {/* ══ Honours sheet (4a) ══ */}
       {honoursOpen && (
         <div style={{ ...modalBackdrop, zIndex: 250 }}>
           <div style={modalCard}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: s(16) }}>
-              <h2 style={{ ...modalTitle, marginBottom: s(6) }}>🏆 Season Honours</h2>
+              <h2 style={{ ...modalTitle, marginBottom: s(6) }}>Season honours</h2>
               <button onClick={() => setHonoursOpen(false)} style={{ ...btnGhost, padding: `${s(14)}px ${s(22)}px`, flexShrink: 0 }}>Close ✕</button>
             </div>
             <div style={{ ...modalBody, marginBottom: s(18) }}>
-              {seasonGames.length} game{seasonGames.length !== 1 ? 's' : ''} · ⭐ Player of the Week · 🏅 Captain
+              {seasonGames.length} round{seasonGames.length !== 1 ? 's' : ''} played · ⭐ Player of the Week · 🏅 Captain
             </div>
 
-            {/* The block that actually answers "who should get it?" */}
-            {eligibleForHonour.length > 0 && (
+            {/* Who has gone longest without one. Never-honoured players sort to
+                the top on their own, so this block is never empty. */}
+            {dueNext.length > 0 && (
               <div style={{
                 background: UI.goTint, border: `4px solid ${UI.go}`, borderRadius: s(16),
                 padding: `${s(20)}px ${s(24)}px`, marginBottom: s(20),
               }}>
-                <div style={{ ...sectionLabel, color: UI.go, marginBottom: s(14) }}>
-                  Never had either — pick from here
+                <div style={{ ...sectionLabel, color: UI.go, marginBottom: s(4) }}>
+                  Longest without one — pick from here
+                </div>
+                <div style={{ fontSize: Math.max(15, s(19)), fontWeight: 700, color: UI.go, marginBottom: s(14) }}>
+                  Playing today, furthest back first.
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: s(12) }}>
-                  {eligibleForHonour.map(p => {
+                  {dueNext.map(p => {
                     const picked = potm === p;
                     return (
-                      <button key={p} onClick={() => setPotm(picked ? '' : p)} style={{
+                      <button key={p} type="button" onClick={() => setPotm(picked ? '' : p)} style={{
                         background: picked ? UI.navy : '#fff',
                         border: `3px solid ${picked ? UI.navy : UI.go}`,
-                        borderRadius: s(12), padding: `${s(14)}px ${s(22)}px`,
-                        fontSize: Math.max(20, s(30)), fontWeight: 800,
-                        color: picked ? '#fff' : UI.navy, cursor: 'pointer', fontFamily: 'inherit',
+                        borderRadius: s(12), padding: `${s(12)}px ${s(22)}px`,
+                        cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
                       }}>
-                        {p}{picked ? ' ✓' : ''}
+                        <div style={{ fontSize: Math.max(20, s(30)), fontWeight: 800, color: picked ? '#fff' : UI.navy }}>
+                          {p}{picked ? ' ✓' : ''}
+                        </div>
+                        <div style={{
+                          fontSize: Math.max(15, s(16)), fontWeight: 900, letterSpacing: s(1),
+                          textTransform: 'uppercase', color: picked ? UI.goOnDark : UI.go,
+                        }}>
+                          {roundsSince(p, true)}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
-                {potm && eligibleForHonour.includes(potm) && (
+                {potm && dueNext.includes(potm) && (
                   <div style={{ marginTop: s(14), fontSize: Math.max(15, s(19)), fontWeight: 800, color: UI.go }}>
                     {potm} is lined up for Player of the Week — confirm it on the save screen.
                   </div>
@@ -1650,12 +1681,12 @@ export default function TeamSheetView({
               </div>
             )}
 
-            {honouredSorted.length > 0 && (
+            {everyoneElse.length > 0 && (
               <>
-                <div style={{ ...sectionLabel, marginBottom: s(10) }}>Already honoured</div>
+                <div style={{ ...sectionLabel, marginBottom: s(10) }}>Everyone else</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: s(8) }}>
-                  {honouredSorted.map(p => {
-                    const { potm: pc, captain: cc, lastRound } = honours[p];
+                  {everyoneElse.map(p => {
+                    const { potm: pc, captain: cc } = honours[p];
                     const playingToday = players.includes(p);
                     const dim = '#a8c0d8';
                     return (
@@ -1675,7 +1706,7 @@ export default function TeamSheetView({
                           <span style={{ color: pc ? UI.bodyText : dim }}>⭐ {pc ? `×${pc}` : '—'}</span>
                           <span style={{ color: cc ? UI.bodyText : dim }}>🏅 {cc ? `×${cc}` : '—'}</span>
                           <span style={{ color: dim }}>
-                            {playingToday ? (lastRound ? `last: R${lastRound}` : '') : 'not playing today'}
+                            {playingToday ? roundsSince(p, false) : 'not playing today'}
                           </span>
                         </div>
                       </div>
@@ -1685,11 +1716,9 @@ export default function TeamSheetView({
               </>
             )}
 
-            {seasonGames.length === 0 && (
-              <div style={{ padding: s(32), textAlign: 'center', color: UI.bodyText, fontWeight: 700, fontSize: Math.max(15, s(20)) }}>
-                No games saved yet — honours will appear here once you've recorded a few matches.
-              </div>
-            )}
+            {/* No empty state. The point of 4a is that "longest without one"
+                answers the question in round 1 too — everyone reads NEVER HAD
+                ONE and the coach picks from the shortlist like any other week. */}
           </div>
         </div>
       )}
@@ -1743,10 +1772,12 @@ export default function TeamSheetView({
               {honourChipRow(potm, setPotm, potmExpanded, setPotmExpanded)}
               {potm && (
                 <div style={{
-                  marginTop: s(8), fontSize: Math.max(14, s(18)), fontWeight: 700,
+                  marginTop: s(8), fontSize: Math.max(15, s(18)), fontWeight: 700,
                   color: eligibleForHonour.includes(potm) ? UI.go : UI.bodyText,
                 }}>
-                  {eligibleForHonour.includes(potm) ? 'Never had one' : `Already has ⭐ ×${honours[potm]?.potm || 0}`}
+                  {eligibleForHonour.includes(potm)
+                    ? 'Never had one'
+                    : `Already has ⭐ ×${honours[potm]?.potm || 0} · last honour ${roundsSince(potm, false)}`}
                   {(matchStats[potm]?.goals || 0) > 0 ? ' · scored today' : ''}
                 </div>
               )}
@@ -1756,7 +1787,7 @@ export default function TeamSheetView({
               <label style={{ ...sectionLabel, display: 'block', marginBottom: s(10) }}>🏅 Captain next week</label>
               {honourChipRow(captain, setCaptain, captainExpanded, setCaptainExpanded)}
               {suggestedCaptain && (
-                <div style={{ marginTop: s(8), fontSize: Math.max(14, s(18)), fontWeight: 700, color: UI.bodyText }}>
+                <div style={{ marginTop: s(8), fontSize: Math.max(15, s(18)), fontWeight: 700, color: UI.bodyText }}>
                   {suggestedCaptain} captained the last win
                 </div>
               )}

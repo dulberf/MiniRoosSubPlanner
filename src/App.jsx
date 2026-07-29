@@ -57,6 +57,10 @@ export default function App() {
   const [playersText, setPlayersText] = useState(DEFAULT_PLAYERS);
   const [gkH1,        setGkH1]        = useState(null);
   const [gkH2,        setGkH2]        = useState(null);
+  // Deliberate "same keeper both halves". Without this flag the auto-suggest
+  // effect below cannot tell a chosen full-game keeper from the accidental
+  // H1/H2 collapse it exists to prevent (Session 6), so it overwrote both.
+  const [gkFullGame,  setGkFullGame]  = useState(false);
 
   // ── Season data
   const [seasonGames, setSeasonGames] = useState(loadSeason);
@@ -136,7 +140,9 @@ export default function App() {
 
     const finalH1 = (gkH1 && players.includes(gkH1)) ? gkH1 : oracleH1;
     let finalH2;
-    if (gkH2 && players.includes(gkH2) && gkH2 !== finalH1) {
+    if (gkFullGame && finalH1) {
+      finalH2 = finalH1; // coach chose one keeper for the full 50
+    } else if (gkH2 && players.includes(gkH2) && gkH2 !== finalH1) {
       finalH2 = gkH2;
     } else if (oracleH2 && oracleH2 !== finalH1) {
       finalH2 = oracleH2;
@@ -148,7 +154,7 @@ export default function App() {
 
     if (finalH1 !== gkH1) setGkH1(finalH1);
     if (finalH2 !== gkH2) setGkH2(finalH2);
-  }, [players, seasonGames, gkH1, gkH2]);
+  }, [players, seasonGames, gkH1, gkH2, gkFullGame]);
 
   const showToast = useCallback((msg, type = 'ok') => {
     clearTimeout(toastTimer.current);
@@ -174,8 +180,8 @@ export default function App() {
   // ── In-progress save (called by TeamSheetView on segment change)
   const handleProgressUpdate = useCallback((currentSeg, matchStats) => {
     if (!segments) return;
-    saveInProgress({ segments, playersText, gkH1, gkH2, currentSeg, matchStats });
-  }, [segments, playersText, gkH1, gkH2]);
+    saveInProgress({ segments, playersText, gkH1, gkH2, gkFullGame, currentSeg, matchStats });
+  }, [segments, playersText, gkH1, gkH2, gkFullGame]);
 
   // ── Resume from setup screen banner (used when modal was dismissed but data still exists)
   const handleResumeFromStorage = useCallback(() => {
@@ -184,6 +190,7 @@ export default function App() {
     setPlayersText(data.playersText);
     if (data.gkH1) setGkH1(data.gkH1);
     if (data.gkH2) setGkH2(data.gkH2);
+    setGkFullGame(!!data.gkFullGame);
     setSegments(data.segments);
     setInitialSegData({ currentSeg: data.currentSeg, matchStats: data.matchStats || {} });
     setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: data.currentSeg, isRunning: false });
@@ -205,7 +212,9 @@ export default function App() {
       const oracleH2 = (slot > 0 && reordered[slot]) ? reordered[slot] : null;
       const finalH1 = (gkH1 && reordered.includes(gkH1)) ? gkH1 : oracleH1;
       let finalH2;
-      if (gkH2 && reordered.includes(gkH2) && gkH2 !== finalH1) {
+      if (gkFullGame && finalH1) {
+        finalH2 = finalH1; // coach chose one keeper for the full 50
+      } else if (gkH2 && reordered.includes(gkH2) && gkH2 !== finalH1) {
         finalH2 = gkH2;
       } else if (oracleH2 && oracleH2 !== finalH1) {
         finalH2 = oracleH2;
@@ -221,7 +230,7 @@ export default function App() {
       setCurrentGameId(null);
       if (view === 'setup') setView('result');
     }
-  }, [players, seasonGames, view, gkH1, gkH2]);
+  }, [players, seasonGames, view, gkH1, gkH2, gkFullGame]);
 
   // ── Mid-game GK change (from TeamSheetView player modal)
   const handleChangeGK = useCallback((fromSegIdx, newGKName) => {
@@ -720,6 +729,7 @@ export default function App() {
             setPlayersText(resumeData.playersText);
             if (resumeData.gkH1) setGkH1(resumeData.gkH1);
             if (resumeData.gkH2) setGkH2(resumeData.gkH2);
+            setGkFullGame(!!resumeData.gkFullGame);
             setSegments(resumeData.segments);
             setInitialSegData({ currentSeg: resumeData.currentSeg, matchStats: resumeData.matchStats || {} });
             setGameClock({ segmentStartTime: null, accumulatedMs: 0, currentSegIdx: resumeData.currentSeg, isRunning: false });
@@ -800,9 +810,12 @@ export default function App() {
         setGkH1={setGkH1}
         gkH2={gkH2}
         setGkH2={setGkH2}
+        gkFullGame={gkFullGame}
+        setGkFullGame={setGkFullGame}
         onGenerate={handleGenerate}
         onReorder={handleReorder}
         onGoSeason={() => setView('season')}
+        seasonGames={seasonGames}
         seasonGameCount={seasonGames.length}
         onImport={handleLandingImport}
         importMsg={importMsg}
