@@ -2,7 +2,9 @@
 *Last updated: 2026-07-29 (Session 14 complete — on branch `ui/sideline-redesign`)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
-**Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
+**Live app:** https://dulberf.github.io/MiniRoosSubPlanner/
+> ⚠️ The old `…/team-sheet-offline.html` URL in earlier versions of this file **404s** — that file is
+> not part of the deployed output. Corrected in Session 15.
 **Working dir:** `C:\Projects\football-sub-planner`
 **Format:** Single self-contained offline HTML. Must stay this way — used on iPad at fields with no WiFi.
 
@@ -42,8 +44,16 @@ football-sub-planner/
 ```bash
 npm run dev       # Dev server at http://localhost:5173
 npm run release   # Vite build → copies dist/index.html to team-sheet-offline.html
-git add team-sheet-offline.html src/ && git commit -m "..." && git push origin main
 ```
+
+### How deployment actually works (documented in Session 15)
+**Pushing to `main` deploys.** `.github/workflows/deploy.yml` runs `npm ci && npm run build` on every
+push to `main` and publishes **`dist/`** to GitHub Pages. So:
+- The live app is `dist/index.html`, served at the site root — **not** `team-sheet-offline.html`,
+  which is committed for offline/manual use but is not part of the deployed output (it 404s live).
+- `public/` is copied into `dist/` by Vite, which is how `sw.js`, `manifest.json` and `icon.svg`
+  reach the live site. A change to `public/sw.js` **does** ship on the next push to `main`.
+- `npm run release` is therefore for the committed offline file only; it is not what deploys.
 
 ---
 
