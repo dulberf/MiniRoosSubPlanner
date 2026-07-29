@@ -169,6 +169,61 @@ Dedup key: `date + JSON.stringify(players) + label`.
 
 ## Session History
 
+### Session 15 — Service worker: offline kept, stale-forever fixed ✅
+**The constraint that drove every decision here:** the app is used on a football field with **no
+wifi**. It must open with no network, every time. That is not negotiable, and it is why the worker
+still caches everything the app fetches on the way past (cache-on-fetch) rather than from a
+hardcoded file list — that part of the original design was right and is unchanged.
+
+**What was wrong.** The old worker answered *every* request from cache and never went back to the
+network, and `CACHE = 'team-sheet-v1'` was hardcoded so the `activate` cleanup (which deletes caches
+*other than* the current one) could never clear it. Once a browser loaded the app it kept that exact
+build permanently. A pushed update could not reach the iPad, and a bad cached state could not heal.
+
+**What changed (`public/sw.js`):**
+- **Page loads: network-first with a 2.5s timeout, falling back to cache.** No network means fetch
+  rejects (or times out) and the cached app is served exactly as before. The timeout matters more
+  than it looks: a dead network usually rejects instantly, but a weak signal or a captive portal at
+  a ground can hang, and the coach cannot wait.
+- **Everything else: stale-while-revalidate** — instant from cache, refreshed in the background.
+- `skipWaiting()` + `clients.claim()`, and the cache name bumped to `team-sheet-v2` so activation
+  clears the stale v1 cache. **This is what lets already-installed devices self-heal** — no need to
+  delete and re-add the home screen app.
+- `SW_VERSION` constant plus a `sw:version` message handler, so a page can ask which worker is
+  actually running. "Is the browser still on the old worker?" is otherwise unanswerable and is the
+  first question worth asking when caching misbehaves.
+
+**Two real bugs caught by testing, both of which would have broken offline:**
+1. `putInCache` cloned the response *after* `await caches.open()`. By then the page may already have
+   read the body, the put silently fails, and nothing is cached. **The clone must be taken
+   synchronously at the call site** — there is a comment saying so; do not tidy it back inside.
+2. The cache write was not registered with `event.waitUntil()`, so the browser was free to kill the
+   worker as soon as `respondWith()` settled, cancelling the pending write. Classic, and invisible
+   until you check the cache is actually populated rather than assuming it.
+
+**`index.html`:** the worker is now registered **everywhere except localhost**, and on localhost any
+worker left by a previous dev session is actively unregistered. A worker on the dev server pins old
+bundles for the rest of the session — it served Session-12 code for an hour during Session 14 and
+produced a blank page on `http://localhost:5174`. Offline support on the dev server is pointless
+anyway.
+
+**Verified, not assumed:**
+- New worker activates immediately, claims the open page without a reload, and deletes the stale
+  `team-sheet-v1` cache.
+- Version handshake confirms which script is live (`2026-07-29.1`).
+- **True offline test:** stopped the dev server (0 listeners on 5174, `curl` exit 7), then through
+  the worker — an **uncached** resource failed (proving the network really was dead) while a
+  **cached** one was served in 2ms. That is the field behaviour.
+- **Season data survived every one of those cache deletions**: 11 games still in `localStorage`
+  afterwards. Worth stating plainly because it is the obvious fear — the worker caches *files*;
+  season data lives in `localStorage` under `teamsheet_season` and this worker never touches it.
+  The actual data-loss risk is Safari ITP clearing localStorage after 7 days of non-use, which is
+  what the Export button is for.
+
+⚠️ **On deploy:** the browser picks up a changed `sw.js` on a navigation, so the first open after
+pushing may still show the old app; the new worker then activates and clears v1, and the next open
+is current. Open it once on wifi at home before relying on it at a ground.
+
 ### Session 14 — Sideline UI redesign, part 2: honours, save, season ✅
 **Branch:** `ui/sideline-redesign` (still not merged — test at a game first).
 
@@ -495,23 +550,7 @@ for touch, poor for accessibility.
 ---
 
 ## Known Issues & Watch List
-- 🚨 **`public/sw.js` serves stale code forever — NOT FIXED, and it will hide the redesign.**
-  Diagnosed in Session 14. The service worker is cache-first with no revalidation and no version
-  bump: `caches.match(request)` returns the cached response and **never** re-fetches, and the cache
-  name `team-sheet-v1` is hardcoded, so the `activate` handler's cleanup never deletes the live
-  cache. Once a browser has loaded the app it keeps that exact build permanently.
-  - This is the real cause of the "Safari caches the HTML aggressively" entry that sat here for
-    several sessions. It is not Safari being aggressive; it is the app telling the browser to do it.
-  - It also explains a blank page on `localhost:5174`: a stale cached `index.html` referencing a
-    hashed JS bundle that no longer exists renders nothing at all.
-  - **Consequence: pushing the redesign to GitHub Pages will not update the iPad.** Clear site data
-    on the device, or fix the worker first.
-  - Suggested fix: network-first (or stale-while-revalidate) for navigation requests, derive the
-    cache name from the build, and call `skipWaiting()` + `clients.claim()` on install so a new
-    version takes over immediately.
-  - To recover a stuck browser now: DevTools → Application → Service Workers → Unregister, then
-    Clear storage. Programmatically: `navigator.serviceWorker.getRegistrations().then(rs =>
-    rs.forEach(r => r.unregister()))` then `caches.keys().then(ks => ks.forEach(k => caches.delete(k)))`.
+- ~~`public/sw.js` serves stale code forever~~ **fixed in Session 15** — see the session entry.
 - **Vite dev server binds IPv6 only** (`[::1]:5174`), so `http://localhost:5174` fails in browsers
   that resolve to IPv4 first and you get a blank untitled tab. Use `http://[::1]:5174`, or add
   `--host 127.0.0.1` to `.claude/launch.json`. Opening `team-sheet-offline.html` directly needs no

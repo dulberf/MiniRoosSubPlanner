@@ -89,9 +89,23 @@ Noa`;function Pi(e){const t=[...e];for(let n=t.length-1;n>0;n--){const r=Math.fl
 <body>
   <div id="root"></div>
   <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
-    }
+    // Register the offline worker everywhere EXCEPT localhost. Offline support
+    // is pointless on the dev server, and a worker there pins old bundles for
+    // the rest of the session — that is what produced a blank page on
+    // http://localhost:5174 and cost a session's worth of debugging.
+    (function () {
+      if (!('serviceWorker' in navigator)) return;
+      var isLocal = ['localhost', '127.0.0.1', '::1', '[::1]'].indexOf(location.hostname) !== -1;
+      if (!isLocal) {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+        return;
+      }
+      // Clean up any worker a previous dev session left behind, so an already
+      // poisoned browser heals itself instead of serving stale code forever.
+      navigator.serviceWorker.getRegistrations()
+        .then(function (regs) { regs.forEach(function (r) { r.unregister(); }); })
+        .catch(function () {});
+    })();
   </script>
 </body>
 </html>
