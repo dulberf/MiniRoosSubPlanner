@@ -108,6 +108,10 @@ export default function TeamSheetView({
   const pendingSwapRef = useRef(null);
 
   const [saveOpen, setSaveOpen] = useState(false);
+  // Chip rows in the save modal show the eligible ("never had one") players by
+  // default; these expand them to the whole squad.
+  const [potmExpanded, setPotmExpanded] = useState(false);
+  const [captainExpanded, setCaptainExpanded] = useState(false);
   const [matchLabel, setMatchLabel] = useState('');
   const [potm, setPotm] = useState('');
   const [captain, setCaptain] = useState('');
@@ -124,6 +128,45 @@ export default function TeamSheetView({
     }
     return '';
   }, [seasonGames]);
+
+  // Season honours tallies. `lastRound` is the 1-based index of the most recent
+  // game where a player was POTW or captain — it drives both the "last: R7"
+  // column and the ranking of who is most overdue.
+  const honours = useMemo(() => {
+    const map = {};
+    const entry = (name) => {
+      if (!map[name]) map[name] = { potm: 0, captain: 0, lastRound: null };
+      return map[name];
+    };
+    players.forEach(entry);
+    (seasonGames || []).forEach((g, i) => {
+      if (g.potm) { const e = entry(g.potm); e.potm++; e.lastRound = i + 1; }
+      if (g.captain) { const e = entry(g.captain); e.captain++; e.lastRound = i + 1; }
+    });
+    return map;
+  }, [players, seasonGames]);
+
+  // Never had either AND playing today. This is the list that actually answers
+  // "who should get it?" — the old sheet was alphabetical and answered nothing.
+  const eligibleForHonour = useMemo(
+    () => players.filter(p => honours[p] && honours[p].potm === 0 && honours[p].captain === 0),
+    [players, honours]
+  );
+
+  // Already honoured: today's squad first, then longest-since-last-honour first,
+  // so the most overdue player is nearest the top.
+  const honouredSorted = useMemo(() => {
+    const squad = new Set(players);
+    return Object.keys(honours)
+      .filter(p => honours[p].potm > 0 || honours[p].captain > 0)
+      .sort((a, b) => {
+        const aIn = squad.has(a), bIn = squad.has(b);
+        if (aIn !== bIn) return aIn ? -1 : 1;
+        const ar = honours[a].lastRound ?? 0, br = honours[b].lastRound ?? 0;
+        if (ar !== br) return ar - br;
+        return a.localeCompare(b);
+      });
+  }, [honours, players]);
 
   // Open save modal and pre-populate scores + captain suggestion
   const openSaveModal = useCallback((initialScore) => {
@@ -560,6 +603,47 @@ export default function TeamSheetView({
     color: '#fff', fontSize: Math.max(15, s(21)), fontWeight: 900,
     cursor: 'pointer', fontFamily: 'inherit',
   });
+
+  // Chip row for POTW / captain. Shows the "never had one" players by default —
+  // the whole point is that the fair answer is the visible one — with an
+  // "Everyone else" escape to the full squad.
+  const honourChipRow = (value, setValue, expanded, setExpanded) => {
+    const showAll = expanded || eligibleForHonour.length === 0;
+    // When everyone has already been honoured there is no "fair" shortlist, so
+    // lead with whoever has gone longest without one.
+    const byOverdue = [...players].sort(
+      (a, b) => (honours[a]?.lastRound ?? 0) - (honours[b]?.lastRound ?? 0)
+    );
+    const base = showAll ? byOverdue : eligibleForHonour;
+    const shown = value && !base.includes(value) ? [value, ...base] : base;
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: s(10) }}>
+        {shown.map(p => {
+          const sel = value === p;
+          return (
+            <button key={p} onClick={() => setValue(sel ? '' : p)} style={{
+              background: sel ? UI.navy : '#fff',
+              border: `3px solid ${sel ? UI.navy : UI.blueLine}`,
+              borderRadius: s(12), padding: `${s(14)}px ${s(24)}px`,
+              fontSize: Math.max(18, s(26)), fontWeight: 800,
+              color: sel ? '#fff' : UI.navy, cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              {p}{sel ? ' ✓' : ''}
+            </button>
+          );
+        })}
+        {!showAll && (
+          <button onClick={() => setExpanded(true)} style={{
+            background: '#fff', border: `3px solid ${UI.blueLine}`, borderRadius: s(12),
+            padding: `${s(14)}px ${s(24)}px`, fontSize: Math.max(18, s(26)),
+            fontWeight: 800, color: UI.label, cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            Everyone else ▾
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const clockNotRunning = !gameClock.isRunning;
   const halfLabel = seg.half === 1 ? '1ST HALF' : '2ND HALF';
@@ -1521,58 +1605,94 @@ export default function TeamSheetView({
         );
       })()}
 
-      {/* ── Honours sheet ── */}
-      {honoursOpen && (() => {
-        const counts = {};
-        players.forEach(p => { counts[p] = { potm: 0, captain: 0 }; });
-        (seasonGames || []).forEach(g => {
-          if (g.potm && counts[g.potm]) counts[g.potm].potm++;
-          if (g.captain && counts[g.captain]) counts[g.captain].captain++;
-        });
-        const sorted = [...players].sort((a, b) => {
-          const at = counts[a].potm + counts[a].captain;
-          const bt = counts[b].potm + counts[b].captain;
-          if (at !== bt) return bt - at;
-          return a.localeCompare(b);
-        });
-        return (
-          <div style={{ ...modalBackdrop, zIndex: 250 }}>
-            <div style={modalCard}>
-              <h2 style={modalTitle}>🏆 Season Honours</h2>
-              <div style={modalBody}>
-                {seasonGames.length} games · ⭐ Player of the Week · 🏅 Captain
-              </div>
-              {seasonGames.length === 0 ? (
-                <div style={{ padding: s(32), textAlign: 'center', color: UI.bodyText, fontWeight: 700, fontSize: Math.max(15, s(20)) }}>
-                  No games saved yet — honours will appear here once you've recorded a few matches.
+      {/* ══ Honours sheet (2c) ══ */}
+      {honoursOpen && (
+        <div style={{ ...modalBackdrop, zIndex: 250 }}>
+          <div style={modalCard}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: s(16) }}>
+              <h2 style={{ ...modalTitle, marginBottom: s(6) }}>🏆 Season Honours</h2>
+              <button onClick={() => setHonoursOpen(false)} style={{ ...btnGhost, padding: `${s(14)}px ${s(22)}px`, flexShrink: 0 }}>Close ✕</button>
+            </div>
+            <div style={{ ...modalBody, marginBottom: s(18) }}>
+              {seasonGames.length} game{seasonGames.length !== 1 ? 's' : ''} · ⭐ Player of the Week · 🏅 Captain
+            </div>
+
+            {/* The block that actually answers "who should get it?" */}
+            {eligibleForHonour.length > 0 && (
+              <div style={{
+                background: UI.goTint, border: `4px solid ${UI.go}`, borderRadius: s(16),
+                padding: `${s(20)}px ${s(24)}px`, marginBottom: s(20),
+              }}>
+                <div style={{ ...sectionLabel, color: UI.go, marginBottom: s(14) }}>
+                  Never had either — pick from here
                 </div>
-              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: s(12) }}>
+                  {eligibleForHonour.map(p => {
+                    const picked = potm === p;
+                    return (
+                      <button key={p} onClick={() => setPotm(picked ? '' : p)} style={{
+                        background: picked ? UI.navy : '#fff',
+                        border: `3px solid ${picked ? UI.navy : UI.go}`,
+                        borderRadius: s(12), padding: `${s(14)}px ${s(22)}px`,
+                        fontSize: Math.max(20, s(30)), fontWeight: 800,
+                        color: picked ? '#fff' : UI.navy, cursor: 'pointer', fontFamily: 'inherit',
+                      }}>
+                        {p}{picked ? ' ✓' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+                {potm && eligibleForHonour.includes(potm) && (
+                  <div style={{ marginTop: s(14), fontSize: Math.max(15, s(19)), fontWeight: 800, color: UI.go }}>
+                    {potm} is lined up for Player of the Week — confirm it on the save screen.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {honouredSorted.length > 0 && (
+              <>
+                <div style={{ ...sectionLabel, marginBottom: s(10) }}>Already honoured</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: s(8) }}>
-                  {sorted.map(p => {
-                    const { potm: pc, captain: cc } = counts[p];
-                    const total = pc + cc;
+                  {honouredSorted.map(p => {
+                    const { potm: pc, captain: cc, lastRound } = honours[p];
+                    const playingToday = players.includes(p);
+                    const dim = '#a8c0d8';
                     return (
                       <div key={p} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: `${s(14)}px ${s(18)}px`, borderRadius: s(12),
+                        gap: s(12), padding: `${s(16)}px ${s(20)}px`, borderRadius: s(12),
                         background: '#fff',
-                        border: `${total === 0 ? 4 : 2}px solid ${total === 0 ? UI.go : UI.blueLine}`,
+                        border: `2px ${playingToday ? 'solid' : 'dashed'} ${UI.blueLine}`,
+                        opacity: playingToday ? 1 : 0.55,
                       }}>
-                        <span style={{ fontSize: Math.max(19, s(28)), fontWeight: 800, color: UI.navy }}>{p}</span>
-                        <div style={{ display: 'flex', gap: s(18), fontSize: Math.max(16, s(22)), fontWeight: 800, color: UI.bodyText }}>
-                          <span style={{ color: pc ? UI.bodyText : '#a8c0d8' }}>⭐ {pc || '—'}</span>
-                          <span style={{ color: cc ? UI.bodyText : '#a8c0d8' }}>🏅 {cc || '—'}</span>
+                        <span style={{ fontSize: Math.max(20, s(30)), fontWeight: 800, color: UI.navy }}>{p}</span>
+                        <div style={{
+                          display: 'flex', gap: s(18), alignItems: 'baseline',
+                          fontSize: Math.max(16, s(24)), fontWeight: 800, color: UI.bodyText,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          <span style={{ color: pc ? UI.bodyText : dim }}>⭐ {pc ? `×${pc}` : '—'}</span>
+                          <span style={{ color: cc ? UI.bodyText : dim }}>🏅 {cc ? `×${cc}` : '—'}</span>
+                          <span style={{ color: dim }}>
+                            {playingToday ? (lastRound ? `last: R${lastRound}` : '') : 'not playing today'}
+                          </span>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              )}
-              <button onClick={() => setHonoursOpen(false)} style={{ ...btnGhost, width: '100%', marginTop: s(20) }}>Close</button>
-            </div>
+              </>
+            )}
+
+            {seasonGames.length === 0 && (
+              <div style={{ padding: s(32), textAlign: 'center', color: UI.bodyText, fontWeight: 700, fontSize: Math.max(15, s(20)) }}>
+                No games saved yet — honours will appear here once you've recorded a few matches.
+              </div>
+            )}
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* ── Post-Game Save Modal ── */}
       {saveOpen && (
@@ -1619,26 +1739,25 @@ export default function TeamSheetView({
             </div>
 
             <div style={{ marginBottom: s(20) }}>
-              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>⭐ Player of the week</label>
-              <select value={potm} onChange={e => setPotm(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-                <option value="">— Select Player —</option>
-                {players.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(10) }}>⭐ Player of the week</label>
+              {honourChipRow(potm, setPotm, potmExpanded, setPotmExpanded)}
+              {potm && (
+                <div style={{
+                  marginTop: s(8), fontSize: Math.max(14, s(18)), fontWeight: 700,
+                  color: eligibleForHonour.includes(potm) ? UI.go : UI.bodyText,
+                }}>
+                  {eligibleForHonour.includes(potm) ? 'Never had one' : `Already has ⭐ ×${honours[potm]?.potm || 0}`}
+                  {(matchStats[potm]?.goals || 0) > 0 ? ' · scored today' : ''}
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: s(28) }}>
-              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>🏅 Captain next week</label>
-              <select value={captain} onChange={e => setCaptain(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-                <option value="">— Select Captain —</option>
-                {players.map(p => <option key={p} value={p}>{p}</option>)}
-                {/* If last win's captain isn't in today's squad, still show them */}
-                {suggestedCaptain && !players.includes(suggestedCaptain) && (
-                  <option value={suggestedCaptain}>{suggestedCaptain} (not in squad)</option>
-                )}
-              </select>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(10) }}>🏅 Captain next week</label>
+              {honourChipRow(captain, setCaptain, captainExpanded, setCaptainExpanded)}
               {suggestedCaptain && (
-                <div style={{ marginTop: s(6), fontSize: Math.max(14, s(18)), fontWeight: 700, color: UI.bodyText }}>
-                  💡 Suggested from last win
+                <div style={{ marginTop: s(8), fontSize: Math.max(14, s(18)), fontWeight: 700, color: UI.bodyText }}>
+                  {suggestedCaptain} captained the last win
                 </div>
               )}
             </div>

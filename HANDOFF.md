@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-07-28 (Session 13 complete — on branch `ui/sideline-redesign`)*
+*Last updated: 2026-07-29 (Session 14 complete — on branch `ui/sideline-redesign`)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/team-sheet-offline.html
@@ -168,6 +168,49 @@ Dedup key: `date + JSON.stringify(players) + label`.
 ---
 
 ## Session History
+
+### Session 14 — Sideline UI redesign, part 2: honours, save, season ✅
+**Branch:** `ui/sideline-redesign` (still not merged — test at a game first).
+
+Completes the design bundle: screens **2c honours**, **2d save** and **2e season**. `InputView`
+(Match Setup) is deliberately untouched — a new design for it is being drawn separately.
+
+**2c Honours** (`TeamSheetView`): a green **NEVER HAD EITHER — PICK FROM HERE** block listing only
+today's squad members with zero honours; tapping a chip pre-selects them for POTW in the save modal.
+Below it, **ALREADY HONOURED** rows with ⭐/🏅 counts and `last: R7`, sorted **today's squad first,
+then longest-since-last-honour first**, so the most overdue player is nearest the top. Players not in
+today's squad render dashed at 55% with "not playing today".
+- New `honours` memo in `TeamSheetView` — `{ potm, captain, lastRound }` per player, where
+  `lastRound` is the 1-based index of the most recent game they were POTW or captain.
+- ⚠️ With the real 11-game season loaded, **every player has already had an honour**, so the green
+  block correctly renders empty. That is the right answer, not a bug — the coach has rotated
+  honours perfectly. The ordering is what carries the information in that case.
+
+**2d Save** (`TeamSheetView`): both `<select>`s replaced by chip rows via `honourChipRow()`. Eligible
+("never had one") players show by default with an "Everyone else ▾" expander; when nobody is eligible
+the full squad shows **sorted by longest-since-last-honour**. Selected chip goes navy with a ✓.
+Helper line under each row. Mismatch warning sits directly under the score. **`onSave` payload is
+byte-identical to before** — this was a presentation change only.
+
+**2e Season** (`SeasonView`, full rewrite): the 11-column table is gone — it could not be read on a
+phone or in sun, which made the fairness data effectively invisible. Replaced by four tabs:
+- **FAIRNESS** — one row per player: wristband swatch (their most-played position), name, bar,
+  average minutes, `7 games · GK ×2`. Sorted descending; the lowest gets a red border and `lowest ·`.
+  Footer names the three players furthest behind, as a **statement of fact, not a promise** about
+  what `buildSchedule` will do — it shuffles positions and the coach can override anything.
+- **MATCHES** — the game history cards, restyled, with edit/delete and the per-player expansion.
+  **Reset Season moved here behind a confirm** (it used to sit one tap from a destructive wipe in
+  the header) and the confirm now suggests exporting a backup first.
+- **HONOURS** — POTW, captain, GK H1/H2 split, bench minutes.
+- **GOALS** — goals bar chart plus assists.
+Nothing was deleted; everything from the old table was re-homed. `SeasonView` now uses `useScale`.
+
+**Verified against the real 11-game season export** (`teamsheet-season-2026-07-06-corrected.json`
+seeded into localStorage): all four tabs, honours sheet, save modal. Totals reconcile — 59 goals in
+the GOALS tab matches "59 goals for" in the header. 17/17 tests.
+
+**⚠️ Service worker is broken and will block this release — see Known Issues.** Found while trying to
+see these changes in the browser: the dev preview kept serving Session-12 code no matter what.
 
 ### Session 13 — Sideline UI redesign, part 1: live game + player sheet ✅
 **Branch:** `ui/sideline-redesign` (not merged to main — test at a game first).
@@ -452,7 +495,27 @@ for touch, poor for accessibility.
 ---
 
 ## Known Issues & Watch List
-- **PWA / Safari cache on iPad:** Safari caches the HTML aggressively after any push. Workaround: Private Browsing tab to force a fresh fetch. Long-term: cache-busting meta tags + service worker auto-update.
+- 🚨 **`public/sw.js` serves stale code forever — NOT FIXED, and it will hide the redesign.**
+  Diagnosed in Session 14. The service worker is cache-first with no revalidation and no version
+  bump: `caches.match(request)` returns the cached response and **never** re-fetches, and the cache
+  name `team-sheet-v1` is hardcoded, so the `activate` handler's cleanup never deletes the live
+  cache. Once a browser has loaded the app it keeps that exact build permanently.
+  - This is the real cause of the "Safari caches the HTML aggressively" entry that sat here for
+    several sessions. It is not Safari being aggressive; it is the app telling the browser to do it.
+  - It also explains a blank page on `localhost:5174`: a stale cached `index.html` referencing a
+    hashed JS bundle that no longer exists renders nothing at all.
+  - **Consequence: pushing the redesign to GitHub Pages will not update the iPad.** Clear site data
+    on the device, or fix the worker first.
+  - Suggested fix: network-first (or stale-while-revalidate) for navigation requests, derive the
+    cache name from the build, and call `skipWaiting()` + `clients.claim()` on install so a new
+    version takes over immediately.
+  - To recover a stuck browser now: DevTools → Application → Service Workers → Unregister, then
+    Clear storage. Programmatically: `navigator.serviceWorker.getRegistrations().then(rs =>
+    rs.forEach(r => r.unregister()))` then `caches.keys().then(ks => ks.forEach(k => caches.delete(k)))`.
+- **Vite dev server binds IPv6 only** (`[::1]:5174`), so `http://localhost:5174` fails in browsers
+  that resolve to IPv4 first and you get a blank untitled tab. Use `http://[::1]:5174`, or add
+  `--host 127.0.0.1` to `.claude/launch.json`. Opening `team-sheet-offline.html` directly needs no
+  server at all and is the truest test.
 - **Preview tool connects to wrong tab:** Test manually at `http://localhost:5173` — don't trust Claude preview screenshot.
 - **Debounce data-loss window:** 3s means up to 3s of goal/assist data lost on sudden crash. Known accepted trade-off.
 - **`visibilitychange` is primary save trigger on iOS** — `beforeunload` alone is unreliable on iPad and must never be the sole flush mechanism.
