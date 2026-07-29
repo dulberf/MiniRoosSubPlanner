@@ -26,8 +26,11 @@ const HALF_MIN   = 25;   // length of one half in minutes
 const FIELD_SIZE = 9;    // GK + 8 outfield positions
 // Deliberately BELOW the pre-game minimum (constants.js MIN_PLAYERS = 7):
 // mid-game injuries must always be recordable, even if the squad drops to 6.
-const MIN_SQUAD  = 6;
-const MAX_SQUAD  = 12;   // matches constants.js MAX_PLAYERS
+// Exported since Session 17: the squad sheet (3b/3c) states these limits in
+// the panel BEFORE the coach commits, rather than letting validateEvent throw
+// into a toast. One source of truth — do not re-declare them in the view.
+export const MIN_SQUAD = 6;
+export const MAX_SQUAD = 12;   // matches constants.js MAX_PLAYERS
 
 // Below this many minutes remaining we don't try to rotate — single block.
 const MIN_ROTATION_MIN = 2;

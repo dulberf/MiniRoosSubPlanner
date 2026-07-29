@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-07-29 (Session 16 complete — on `main`)*
+*Last updated: 2026-07-29 (Session 17 complete — on `main`)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/
@@ -179,6 +179,93 @@ Dedup key: `date + JSON.stringify(players) + label`.
 
 ## Session History
 
+### Session 17 — Design screens 3b (squad sheet) + 3c (player off) + 3d (minutes prompt) ✅
+Built as one lump on purpose: 3b **deletes** the two modals 3c replaces, so splitting them would
+leave the app half-migrated. Same v3 bundle as Session 16.
+
+**LATE PLAYER and PLAYER OUT are gone — as buttons and as modals.** The squad sheet's chip grid is
+now the roster editor: tap a playing chip to take someone off, tap a dashed chip to bring them back.
+It also answers "who is actually here", which the old sheet never did.
+
+**3b — the sheet is a right-hand side sheet, not a centred modal.** `min(s(648)px, 92vw)`, full
+height, over a `UI.scrim` backdrop, anchored to the **top of `<main>`** so the header and pip strip
+stay visible above it. **This is the point, not decoration** — losing sight of the clock is the
+failure mode the whole redesign exists to fix, and a centred modal over a running game reintroduces
+it. The top is measured via a `bodyRef` + `getBoundingClientRect` on open and on resize, *not*
+recomputed from `s()` sizes, which would drift the moment the header changes.
+
+Structure: header with a live count line ("11 here · 9 on · 2 on the bench") → WHO'S AVAILABLE chip
+grid → REARRANGE THE LINEUP / SHOW THE KIDS → MATCH NOTES → START AGAIN pinned to the bottom.
+- Chip states: navy fill = on the field (`RM · ON`), white = bench (`BENCH · ON AT 17` via
+  `nextAppearance`), **dashed = not here**, amber = the player whose 3c panel is open (`GOING OFF`).
+- ⚠️ The chip uses the **short** position key (`RM`); the 3c panel heading uses `POS_LABEL`
+  ("WHO TAKES RIGHT MID NOW?"). The design does both and the grid has no room for the long form.
+- Notes moved low in the sheet deliberately — a half-time, standing-still task that must not compete
+  for the thumb.
+- **`Wipe the game` is a 2-second hold**, not a tap, with a fill gradient and a KEEP HOLDING… label.
+  It is the only irreversible action in the app and it used to sit a thumb-width from the notes box.
+  The timer is cleared on release, on unmount, and whenever the sheet closes, so a half-finished hold
+  can never carry into a later tap. **Verified both ways: a full hold wipes; a tap does nothing.**
+- Two routes to the sub survive but are named differently. The fast path is the pitch (tap the
+  player → MOVE POSITION); the sheet's is REARRANGE THE LINEUP, the deliberate several-players path.
+
+**3c — a player comes off. Expands in place inside the sheet**, amber not red: this changes the
+plan, it is not an error. Bench chips are labelled with minutes played and default to the lowest,
+matching `pickReplacement()` in `replan.js`.
+- **The "what this does to the rest" copy is the honest version and must stay that way.** The
+  removed player's minutes are *not* handed to one substitute: `buildRemainderForHalf` rebuilds the
+  rest of the half and an H1 removal also triggers `buildFreshHalf` for the whole second half. The
+  panel says the later periods will not match the board. The coach notices ten minutes later
+  otherwise, and stops trusting the app.
+- Both blocked states are stated **in the panel, never as a thrown toast**: tapping the GK shows
+  "Pick a new goalkeeper first" with a single ALLOCATE GK button, and the `MIN_SQUAD` floor states
+  the block. `MIN_SQUAD` / `MAX_SQUAD` are now **exported from `replan.js`** — one source of truth,
+  do not re-declare them in the view. (The 6-player floor panel is reasoned and shares the constant
+  but was not exercised in the browser; reaching it needs six removals.)
+
+**3d — "When did this happen?" promoted from a modal-on-a-modal to a screen of its own.**
+- Amber header inheriting the 2a rule, sub-line `P3 · 1ST HALF · CLOCK NOT RUNNING`.
+- One 96px bar split at the entered minute — navy `LOCKED — CAN'T CHANGE` / white `THIS EDIT APPLIES
+  HERE`. This is the visual form of `splitSegment` and it is why the answer matters.
+- 108px −/+ steppers around a 72px readout, **clamped rather than disabled** so the control never
+  feels stuck, plus `Right at the start` / `Halfway` / `Nearly the whole period`. Halfway is the
+  default, and is what a coach actually knows.
+- IF YOU GET THIS WRONG panel: minutes shift by however far out you are, say half a period if
+  unsure, correctable from the season screen. A prompt that can't be answered confidently gets
+  dismissed carelessly, which is the same bug wearing a hat.
+- ⚠️ **The hard constraint is unchanged**: the flow still asks when the change happened whenever the
+  clock isn't timing the current period. That question is the entire fix for the Round-8 bug that
+  left one player on 25 minutes and another on 50. The Session-12 guarded escape hatch ("change the
+  whole period", disabled once the period has elapsed time) is preserved verbatim.
+- `confirmSubFromTime` now takes the minutes explicitly (`confirmSubFromTime(clamped)`) and falls
+  back to the input state.
+
+**Bug found and fixed during verification:** the period's kickoff-relative start was read as
+`seg.label.match(/(\d+)/)` — which matches the **1 in "H1"**, so P1 of a 12-player game displayed
+as "MINUTE 1 TO 11" instead of 0 to 10. Now summed from prior segment durations.
+
+**Verified end-to-end in the browser at 810 × 1080, clock running, real season loaded:**
+sheet anchors at the top of `<main>` (159px) and is 513px wide, header and pips still visible →
+tap Ivy → 3c panel with the right position and replacement chips → tap the GK → GK block panel, not
+a toast → REARRANGE THE LINEUP → 3d → steppers clamp at 1, bar splits 1/9, CTA singularises to
+"1 MINUTE IN" → CARRY ON at halfway **splits P1 into a locked P1 ✓ and a live P2**, pips go P1–P4 →
+P1–P5, edit mode opens → FINISH EDITING → take Clara off (keeps her 5 real minutes, Cara takes right
+mid) → she reappears **dashed, NOT HERE** → tap her back on → she is in the bench rotation again
+("Clara ▲ ON for Noa · RB"). **No console errors. 24/24 tests.**
+
+**Files touched:** `src/components/TeamSheetView.jsx`, `src/replan.js`, `team-sheet-offline.html`
+(rebuilt), `HANDOFF.md`.
+
+**Left from the v3 bundle:** the accessibility pass (tokens and rail cards → real `<button>`s with
+aria-labels; the new sheet's controls are already real buttons).
+
+**4b landscape is deliberately not being built.** The coach's call, 29/7/2026: *"I am not too
+concerned with the landscape mode, we don't really use it."* The iPad is held in portrait at the
+ground. The design and its render are in the bundle if that ever changes — it is a layout branch
+(flex direction, pitch viewBox 100×148 → 148×100, action stack unstacks into a row), not a second
+component. Do not spend a session on it without asking first. Note this also settles the "landscape
+/ portrait orientation" open question in the Obsidian product note.
+
 ### Session 16 — Design screens 3a (match setup) + 4a (honours) ✅
 **Source:** `Football app sideline interface v3.zip` — the third export of the design bundle.
 v3 is the first one that carries renders for the TURN 3 / TURN 4 screens; v2's README described
@@ -264,7 +351,7 @@ identically in round 1 and round 30 because "never" sorts ahead of any round num
 
 **Still to build from the v3 bundle:** 3b squad sheet, 3c player-off, 3d minutes prompt (one flow —
 3b deletes the modals 3c replaces, so splitting them leaves the app half-migrated), then 4b
-landscape, then the accessibility pass.
+landscape, then the accessibility pass. *(3b/3c/3d done in Session 17.)*
 
 ### Session 15 — Service worker: offline kept, stale-forever fixed ✅
 **The constraint that drove every decision here:** the app is used on a football field with **no
@@ -418,7 +505,8 @@ modals preserved):
   out of it into the SQUAD sheet (they were one tap from a destructive wipe).
 - Tool row: `⚽ GOAL · 🧤 GK · 👥 SQUAD · 🏆 HONOURS · 📅 SEASON · 💾 SAVE`, 88px targets.
 - **`SQUAD` sheet** re-homes the orphaned features: late player, player out, edit lineup/sub, match
-  notes, Show Kids, reset period, reset game.
+  notes, Show Kids, reset period, reset game. *(Replaced in Session 17 by 3b — it is now a
+  right-hand side sheet and the LATE PLAYER / PLAYER OUT buttons and modals are gone.)*
 - **Player sheet (2b)** replaces the fat-finger bottom panel. `minutesPlayedSoFar()` is deliberately
   *not* `calcStats` — the sheet says "min played", so it counts completed periods plus live elapsed,
   not the whole-game projection.

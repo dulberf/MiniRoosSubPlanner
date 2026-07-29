@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import FieldView from './FieldView.jsx';
 import { calcStats, nextAppearance } from '../scheduler.js';
+import { MIN_SQUAD, MAX_SQUAD } from '../replan.js';
 import { POS_BG, POS_TEXT, POS_BAND, POS_LABEL, UI } from '../constants.js';
 import useScale from '../useScale.js';
 
@@ -91,12 +92,62 @@ export default function TeamSheetView({
   const [ackFlashFor, setAckFlashFor] = useState(null); // segIdx showing "✓ · UNDO"
   const ackTimerRef = useRef(null);
 
-  // Roster-change UI state
-  const [latePlayerOpen, setLatePlayerOpen] = useState(false);
-  const [latePlayerName, setLatePlayerName] = useState('');
-  const [playerOutOpen, setPlayerOutOpen] = useState(false);
-  const [playerOutName, setPlayerOutName] = useState('');
-  const [playerOutReplacement, setPlayerOutReplacement] = useState('');
+  // Roster-change UI state (3b/3c). LATE PLAYER and PLAYER OUT and both of
+  // their modals are gone: the squad sheet's chip grid IS the roster editor.
+  // Tap a playing chip to take someone off, a dashed chip to bring them on.
+  const [playerOff, setPlayerOff] = useState(null);           // name whose 3c panel is open
+  const [playerOffReplacement, setPlayerOffReplacement] = useState('');
+  const [newPlayerOpen, setNewPlayerOpen] = useState(false);  // "+ SOMEONE NEW"
+  const [newPlayerName, setNewPlayerName] = useState('');
+  // "Wipe the game" is the only irreversible action in the app, so it is a
+  // 2-second hold rather than a tap. 0 → 1 over the hold.
+  const [wipeHold, setWipeHold] = useState(0);
+  const wipeTimerRef = useRef(null);
+  // The side sheet hangs below the header + pip strip so the clock never goes
+  // out of sight — losing the clock is the failure mode this redesign exists to
+  // fix. Measured off <main> rather than recomputed from s() sizes.
+  const bodyRef = useRef(null);
+  const [sheetTop, setSheetTop] = useState(0);
+
+  useEffect(() => {
+    if (!squadOpen) return;
+    const measure = () => {
+      const top = bodyRef.current?.getBoundingClientRect().top;
+      if (typeof top === 'number') setSheetTop(Math.max(0, top));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, [squadOpen]);
+
+  // Hold-to-wipe. Cleared on release, on unmount, and whenever the sheet closes,
+  // so a half-finished hold can never carry over into a later tap.
+  const startWipeHold = () => {
+    if (wipeTimerRef.current) return;
+    const started = Date.now();
+    wipeTimerRef.current = setInterval(() => {
+      const pct = Math.min(1, (Date.now() - started) / 2000);
+      setWipeHold(pct);
+      if (pct >= 1) {
+        clearInterval(wipeTimerRef.current);
+        wipeTimerRef.current = null;
+        setWipeHold(0);
+        wakeLockRef.current?.release();
+        onResetGame?.();
+        setSquadOpen(false);
+      }
+    }, 50);
+  };
+  const cancelWipeHold = () => {
+    clearInterval(wipeTimerRef.current);
+    wipeTimerRef.current = null;
+    setWipeHold(0);
+  };
+  useEffect(() => () => clearInterval(wipeTimerRef.current), []);
 
   // Emergency mid-period sub: when the clock isn't timing this period we ask how
   // many minutes have been played, so the past stays locked and only the rest of
@@ -521,8 +572,10 @@ export default function TeamSheetView({
   };
 
   // Coach gave a split time: lock the played part, edit only the rest.
-  const confirmSubFromTime = () => {
-    const mins = parseInt(subPromptMins, 10);
+  // Takes the value explicitly (3d's steppers clamp before calling) and falls
+  // back to the input state; splitSegment requires 1 ≤ mins < duration.
+  const confirmSubFromTime = (explicitMins) => {
+    const mins = Number.isFinite(explicitMins) ? explicitMins : parseInt(subPromptMins, 10);
     if (!Number.isFinite(mins) || mins < 1 || mins > seg.duration - 1) return;
     const futureSegIdx = onSplitSegment(currentSeg, mins);
     setSubPrompt(false);
@@ -829,7 +882,7 @@ export default function TeamSheetView({
       </div>
 
       {/* ══ Body ══ */}
-      <main style={{
+      <main ref={bodyRef} style={{
         flex: 1, minHeight: 0, display: 'flex', gap: s(14),
         padding: `${s(14)}px ${s(16)}px`,
         flexDirection: isKidsView ? 'column' : 'row',
@@ -1307,64 +1360,347 @@ export default function TeamSheetView({
         </div>
       )}
 
-      {/* ══ Squad sheet — late player, player out, notes, kids view, resets ══ */}
-      {squadOpen && (
-        <div style={{ ...modalBackdrop, zIndex: 230 }}>
-          <div style={modalCard}>
-            <h2 style={modalTitle}>👥 Squad &amp; game</h2>
-            <div style={modalBody}>
-              {activeSquadSize} players · {seg.bench.length} on the bench
-            </div>
+      {/* ══ Squad sheet (3b) — a right-hand side sheet, NOT a centred modal.
+           The header and pip strip stay visible above it: losing sight of the
+           clock is the failure mode this whole redesign exists to fix.
+           The chip grid replaces LATE PLAYER and PLAYER OUT and both of their
+           modals, and answers "who is actually here", which the old sheet
+           never did. ══ */}
+      {squadOpen && (() => {
+        const activeNames = new Set();
+        Object.values(seg.assignment).forEach(n => { if (n) activeNames.add(n); });
+        seg.bench.forEach(n => { if (n) activeNames.add(n); });
 
-            {!isEffectivelyLocked && onRosterChange && (
-              <div style={{ display: 'flex', gap: s(12), marginBottom: s(20) }}>
-                <button onClick={() => { setLatePlayerName(''); setSquadOpen(false); setLatePlayerOpen(true); }}
-                  style={{ ...btnGhost, flex: 1, borderColor: UI.navy, color: UI.navy, fontWeight: 900 }}>
-                  ➕ LATE PLAYER
-                </button>
-                <button onClick={() => { setPlayerOutName(''); setPlayerOutReplacement(''); setSquadOpen(false); setPlayerOutOpen(true); }}
-                  style={{ ...btnGhost, flex: 1, borderColor: UI.navy, color: UI.navy, fontWeight: 900 }}>
-                  ➖ PLAYER OUT
-                </button>
-              </div>
-            )}
+        const posOf = (n) => Object.entries(seg.assignment).find(([, v]) => v === n)?.[0];
+        const notHere = players.filter(p => !activeNames.has(p));
+        const onCount = Object.values(seg.assignment).filter(Boolean).length;
+        const canEditRoster = !isEffectivelyLocked && !!onRosterChange;
 
-            {!isEffectivelyLocked && (
-              <button onClick={() => { setSquadOpen(false); handleEmergencySub(); }}
-                style={{ ...btnGhost, width: '100%', borderColor: UI.navy, color: UI.navy, fontWeight: 900, marginBottom: s(20) }}>
-                🔄 EDIT LINEUP / SUB
-              </button>
-            )}
+        const closeSheet = () => {
+          cancelWipeHold();
+          setPlayerOff(null);
+          setNewPlayerOpen(false);
+          setSquadOpen(false);
+        };
 
-            <div style={{ ...sectionLabel, marginBottom: s(8) }}>Match notes</div>
-            <textarea
-              value={matchNotes}
-              onChange={e => setMatchNotes(e.target.value)}
-              placeholder="Tactics, HT talk, training focus..."
-              style={{ ...inputStyle, minHeight: s(120), resize: 'vertical', lineHeight: 1.5, marginBottom: s(20) }}
+        // Chip states: navy = on the field, white = on the bench, dashed = not
+        // here, amber = the player whose 3c panel is open.
+        const chipFor = (name) => {
+          const pos = posOf(name);
+          const here = activeNames.has(name);
+          const going = playerOff === name;
+          const back = here && !pos ? nextAppearance(segments, currentSeg, name) : null;
+          // Short code on the chip (it sits in a 3-column grid); the long name
+          // is used in the 3c panel heading, where there is room to read it.
+          const sub = going ? 'GOING OFF'
+            : !here ? 'NOT HERE'
+            : pos ? `${pos} · ON`
+            : back ? `BENCH · ON AT ${back.minute}` : 'BENCH';
+          return { pos, here, going, sub };
+        };
+
+        return (
+          <>
+            {/* Scrim over the pitch only — the chrome above stays legible. */}
+            <div
+              onClick={closeSheet}
+              style={{ position: 'fixed', left: 0, right: 0, top: sheetTop, bottom: 0, background: UI.scrim, zIndex: 230 }}
             />
+            <div style={{
+              position: 'fixed', right: 0, top: sheetTop, bottom: 0, width: `min(${s(648)}px, 92vw)`,
+              background: '#fff', borderLeft: `3px solid ${UI.blueLine}`, zIndex: 231,
+              display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
+            }}>
+              {/* Header */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                gap: s(16), padding: `${s(22)}px ${s(26)}px ${s(16)}px`,
+                borderBottom: `2px solid ${UI.blueLine}`, flexShrink: 0,
+              }}>
+                <div>
+                  <div style={{ fontSize: Math.max(26, s(40)), fontWeight: 800, color: UI.navy, letterSpacing: -0.5, lineHeight: 1.05 }}>
+                    Squad
+                  </div>
+                  <div style={{ fontSize: Math.max(16, s(21)), fontWeight: 700, color: UI.bodyText, marginTop: s(4) }}>
+                    {activeSquadSize} here · {onCount} on · {seg.bench.filter(Boolean).length} on the bench
+                  </div>
+                </div>
+                <button type="button" onClick={closeSheet} style={{
+                  width: s(72), height: s(72), flexShrink: 0, borderRadius: s(12),
+                  border: `2px solid ${UI.blueLine}`, background: '#fff', color: UI.navy,
+                  fontSize: Math.max(22, s(30)), fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+                }}>✕</button>
+              </div>
 
-            <button onClick={() => { setOrientation('horizontal-right'); setSquadOpen(false); }}
-              style={{ ...btnGhost, width: '100%', borderColor: UI.navy, color: UI.navy, fontWeight: 900, marginBottom: s(20) }}>
-              📺 SHOW THE KIDS
-            </button>
+              {/* Scrolling middle */}
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `${s(18)}px ${s(26)}px` }}>
 
-            <div style={{ ...sectionLabel, marginBottom: s(8) }}>Danger zone</div>
-            <div style={{ display: 'flex', gap: s(12), marginBottom: s(20) }}>
-              <button onClick={() => { onResetClock?.(); setSquadOpen(false); }}
-                style={{ ...btnGhost, flex: 1, borderColor: UI.stop, color: UI.stop }}>
-                🔄 Reset period
-              </button>
-              <button onClick={() => { wakeLockRef.current?.release(); onResetGame?.(); setSquadOpen(false); }}
-                style={{ ...btnSolid(UI.stop), flex: 1 }}>
-                🗑️ Reset game
-              </button>
+                <div style={{ ...sectionLabel, marginBottom: s(12) }}>Who's available</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: s(10) }}>
+                  {[...players].map(name => {
+                    const { here, going, sub } = chipFor(name);
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        disabled={!canEditRoster}
+                        onClick={() => {
+                          if (!canEditRoster) return;
+                          if (here) {
+                            setPlayerOffReplacement('');
+                            setPlayerOff(playerOff === name ? null : name);
+                          } else {
+                            onRosterChange?.({ type: 'add', name });
+                            closeSheet();
+                          }
+                        }}
+                        style={{
+                          padding: `${s(12)}px ${s(8)}px`, borderRadius: s(12), textAlign: 'center',
+                          cursor: canEditRoster ? 'pointer' : 'default', fontFamily: 'inherit',
+                          background: going ? '#fff' : here && posOf(name) ? UI.navy : '#fff',
+                          border: `3px ${here ? 'solid' : 'dashed'} ${going ? UI.warn : here ? UI.navy : UI.blueLine}`,
+                          color: going ? UI.warn : here && posOf(name) ? '#fff' : here ? UI.navy : UI.label,
+                          opacity: here ? 1 : 0.75,
+                        }}>
+                        <div style={{ fontSize: Math.max(18, s(26)), fontWeight: 800, lineHeight: 1.1 }}>{name}</div>
+                        <div style={{
+                          fontSize: Math.max(15, s(15)), fontWeight: 900, letterSpacing: s(1),
+                          marginTop: s(2), opacity: going ? 1 : 0.85,
+                        }}>{sub}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {canEditRoster && (
+                  <div style={{ display: 'flex', gap: s(14), alignItems: 'flex-start', marginTop: s(12), flexWrap: 'wrap' }}>
+                    <button type="button" onClick={() => { setNewPlayerName(''); setNewPlayerOpen(v => !v); }} style={{
+                      border: `3px dashed ${UI.blueLine}`, borderRadius: s(12), background: 'transparent',
+                      padding: `${s(12)}px ${s(18)}px`, fontSize: Math.max(16, s(20)), fontWeight: 800,
+                      color: UI.label, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+                    }}>+ SOMEONE NEW</button>
+                    <div style={{ flex: 1, minWidth: s(200), fontSize: Math.max(16, s(18)), fontWeight: 600, color: UI.bodyText, lineHeight: 1.4 }}>
+                      Tap a name to take them off. Tap a dashed name to bring them on — they're worked into the rest of the plan.
+                    </div>
+                  </div>
+                )}
+
+                {newPlayerOpen && (() => {
+                  const trimmed = newPlayerName.trim();
+                  const dup = activeNames.has(trimmed);
+                  const tooMany = activeSquadSize >= MAX_SQUAD;
+                  const ok = trimmed.length > 0 && !dup && !tooMany;
+                  return (
+                    <div style={{ marginTop: s(12), padding: s(16), borderRadius: s(14), border: `3px solid ${UI.blueLine}` }}>
+                      <input
+                        value={newPlayerName}
+                        onChange={e => setNewPlayerName(e.target.value)}
+                        placeholder="Name"
+                        autoFocus
+                        style={inputStyle}
+                      />
+                      {trimmed && !ok && (
+                        <div style={{ marginTop: s(10), fontSize: Math.max(15, s(18)), fontWeight: 800, color: UI.stop }}>
+                          {dup ? `${trimmed} is already in the squad.` : `Maximum is ${MAX_SQUAD} players (already at ${activeSquadSize}).`}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: s(10), marginTop: s(12) }}>
+                        <button type="button" onClick={() => setNewPlayerOpen(false)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
+                        <button
+                          type="button"
+                          disabled={!ok}
+                          onClick={() => { onRosterChange?.({ type: 'add', name: trimmed }); closeSheet(); }}
+                          style={{ ...btnSolid(ok ? UI.go : UI.label), flex: 2, cursor: ok ? 'pointer' : 'not-allowed' }}>
+                          Bring {trimmed || 'them'} on
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── 3c: a player comes off. Expands in place — no second modal,
+                     no losing your scroll position. Amber, not red: this changes
+                     the plan, it is not an error. ── */}
+                {playerOff && (() => {
+                  const pos = posOf(playerOff);
+                  const isGK = seg.assignment.GK === playerOff;
+                  const wouldDropBelowFloor = activeSquadSize - 1 < MIN_SQUAD;
+                  const benchOptions = seg.bench.filter(Boolean);
+                  // pickReplacement() in replan.js takes the bench player with
+                  // the least cumulative minutes — default to the same one.
+                  const byMinutes = [...benchOptions].sort((a, b) => minutesPlayedSoFar(a) - minutesPlayedSoFar(b));
+                  const chosen = playerOffReplacement || byMinutes[0] || '';
+                  const needsReplacement = !!pos && benchOptions.length > 0;
+                  const noBench = !!pos && benchOptions.length === 0 && activeSquadSize - 1 >= 9;
+                  const blocked = isGK || wouldDropBelowFloor || noBench;
+
+                  return (
+                    <div style={{
+                      marginTop: s(16), padding: `${s(20)}px ${s(22)}px`, borderRadius: s(16),
+                      background: UI.warnTint, border: `3px solid ${UI.warn}`,
+                    }}>
+                      <div style={{ fontSize: Math.max(22, s(32)), fontWeight: 800, color: UI.warnText, lineHeight: 1.15 }}>
+                        {isGK ? `${playerOff} is in goal` : `${playerOff} comes off now`}
+                      </div>
+
+                      {isGK ? (
+                        <>
+                          <div style={{ fontSize: Math.max(16, s(21)), fontWeight: 700, color: UI.warnText, marginTop: s(8), lineHeight: 1.45 }}>
+                            Pick a new goalkeeper first, then take {playerOff} off. The rotation can't leave the goal empty.
+                          </div>
+                          <div style={{ display: 'flex', gap: s(12), marginTop: s(18) }}>
+                            <button type="button" onClick={() => setPlayerOff(null)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
+                            <button type="button" onClick={() => { setPlayerOff(null); setSquadOpen(false); setGkPickerOpen(true); }}
+                              style={{ ...btnSolid(UI.warn), flex: 2 }}>
+                              ALLOCATE GK
+                            </button>
+                          </div>
+                        </>
+                      ) : wouldDropBelowFloor ? (
+                        <>
+                          <div style={{ fontSize: Math.max(16, s(21)), fontWeight: 700, color: UI.warnText, marginTop: s(8), lineHeight: 1.45 }}>
+                            You're down to {activeSquadSize}. {MIN_SQUAD} is the floor — below that there aren't enough players to keep a game going.
+                          </div>
+                          <button type="button" onClick={() => setPlayerOff(null)} style={{ ...btnGhost, width: '100%', marginTop: s(18) }}>Close</button>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: Math.max(16, s(21)), fontWeight: 700, color: UI.warnText, marginTop: s(8), lineHeight: 1.45 }}>
+                            {playerOff} keeps the <strong>{minutesPlayedSoFar(playerOff)} minutes</strong> already played. Nothing already played changes.
+                          </div>
+
+                          {needsReplacement && (
+                            <>
+                              <div style={{ ...sectionLabel, color: UI.warn, marginTop: s(16), marginBottom: s(10) }}>
+                                Who takes {POS_LABEL[pos] || pos} now?
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: s(10) }}>
+                                {byMinutes.map((b, i) => {
+                                  const sel = chosen === b;
+                                  return (
+                                    <button key={b} type="button" onClick={() => setPlayerOffReplacement(b)} style={{
+                                      background: sel ? UI.navy : '#fff',
+                                      border: `3px solid ${sel ? UI.navy : UI.blueLine}`,
+                                      borderRadius: s(12), padding: `${s(12)}px ${s(18)}px`,
+                                      color: sel ? '#fff' : UI.navy, cursor: 'pointer', fontFamily: 'inherit',
+                                      display: 'flex', alignItems: 'baseline', gap: s(8),
+                                    }}>
+                                      <span style={{ fontSize: Math.max(18, s(26)), fontWeight: 800 }}>{b}{sel ? ' ✓' : ''}</span>
+                                      <span style={{ fontSize: Math.max(15, s(17)), fontWeight: 800, opacity: 0.85 }}>
+                                        {minutesPlayedSoFar(b)} min{i === 0 ? ' — least' : ''}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+
+                          {/* Corrected after reading replan.js: the removed player's
+                              minutes are NOT handed to one substitute.
+                              buildRemainderForHalf rebuilds the rest of the half, and
+                              an H1 removal also triggers buildFreshHalf for the whole
+                              second half. Saying so is the honest version — the coach
+                              notices ten minutes later otherwise, and distrusts it. */}
+                          <div style={{
+                            marginTop: s(16), padding: `${s(14)}px ${s(18)}px`, borderRadius: s(12),
+                            background: '#fff', border: `2px solid ${UI.blueLine}`,
+                          }}>
+                            <div style={{ ...sectionLabel, marginBottom: s(6) }}>What this does to the rest</div>
+                            <div style={{ fontSize: Math.max(16, s(21)), fontWeight: 700, color: UI.navy, lineHeight: 1.45 }}>
+                              {needsReplacement ? `${chosen} goes straight into ${(POS_LABEL[pos] || pos).toLowerCase()}. ` : ''}
+                              The rest of this {seg.half === 1 ? 'half and the whole second half are' : 'half is'} then
+                              re-planned for {activeSquadSize - 1} players, sharing the remaining minutes equally — so the
+                              periods after this one will not match what's on the board now.
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: s(12), marginTop: s(18) }}>
+                            <button type="button" onClick={() => setPlayerOff(null)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
+                            <button
+                              type="button"
+                              disabled={blocked}
+                              onClick={() => {
+                                onRosterChange?.({
+                                  type: 'remove',
+                                  name: playerOff,
+                                  replacementOnField: needsReplacement ? chosen : undefined,
+                                });
+                                closeSheet();
+                              }}
+                              style={{ ...btnSolid(UI.warn), flex: 2, cursor: blocked ? 'not-allowed' : 'pointer' }}>
+                              TAKE {playerOff.toUpperCase()} OFF
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Two routes to the sub, deliberately named differently. The
+                    fast path is the pitch — tap the player, then MOVE POSITION.
+                    This is the deliberate, several-players-at-once path. */}
+                <div style={{ display: 'flex', gap: s(12), marginTop: s(22) }}>
+                  <button
+                    type="button"
+                    disabled={isEffectivelyLocked}
+                    onClick={() => { setSquadOpen(false); handleEmergencySub(); }}
+                    style={{
+                      ...btnGhost, flex: 1, borderColor: isEffectivelyLocked ? UI.blueLine : UI.navy,
+                      color: isEffectivelyLocked ? UI.label : UI.navy, fontWeight: 900,
+                      cursor: isEffectivelyLocked ? 'not-allowed' : 'pointer',
+                    }}>
+                    REARRANGE THE LINEUP
+                  </button>
+                  <button type="button" onClick={() => { setOrientation('horizontal-right'); closeSheet(); }}
+                    style={{ ...btnGhost, flex: 1, borderColor: UI.navy, color: UI.navy, fontWeight: 900 }}>
+                    SHOW THE KIDS
+                  </button>
+                </div>
+                <div style={{ fontSize: Math.max(16, s(18)), fontWeight: 600, color: UI.label, marginTop: s(8), lineHeight: 1.4 }}>
+                  Moving one player is quicker from the pitch — tap them, then MOVE POSITION.
+                </div>
+
+                {/* Low in the sheet on purpose: notes are a half-time,
+                    standing-still task and must not compete for the thumb. */}
+                <div style={{ ...sectionLabel, marginTop: s(24), marginBottom: s(8) }}>Match notes</div>
+                <textarea
+                  value={matchNotes}
+                  onChange={e => setMatchNotes(e.target.value)}
+                  placeholder="Tactics, HT talk, training focus…"
+                  style={{ ...inputStyle, minHeight: s(120), resize: 'vertical', lineHeight: 1.5 }}
+                />
+              </div>
+
+              {/* Pinned to the bottom, below a rule. Reset used to sit a
+                  thumb-width from the notes box. */}
+              <div style={{ flexShrink: 0, borderTop: `2px solid ${UI.blueLine}`, padding: `${s(16)}px ${s(26)}px ${s(20)}px` }}>
+                <div style={{ ...sectionLabel, marginBottom: s(10) }}>Start again</div>
+                <div style={{ display: 'flex', gap: s(12) }}>
+                  <button type="button" onClick={() => { onResetClock?.(); closeSheet(); }} style={{ ...btnGhost, flex: 1 }}>
+                    Restart this period
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={startWipeHold} onMouseUp={cancelWipeHold} onMouseLeave={cancelWipeHold}
+                    onTouchStart={startWipeHold} onTouchEnd={cancelWipeHold} onTouchCancel={cancelWipeHold}
+                    style={{
+                      ...btnGhost, flex: 1, borderColor: UI.stop, color: UI.stop, fontWeight: 900,
+                      background: `linear-gradient(to right, ${UI.stop}22 ${wipeHold * 100}%, #fff ${wipeHold * 100}%)`,
+                      touchAction: 'none', userSelect: 'none',
+                    }}>
+                    Wipe the game
+                    <div style={{ fontSize: Math.max(15, s(15)), fontWeight: 900, letterSpacing: s(1), marginTop: s(2) }}>
+                      {wipeHold > 0 ? 'KEEP HOLDING…' : 'HOLD 2 SECONDS'}
+                    </div>
+                  </button>
+                </div>
+              </div>
             </div>
-
-            <button onClick={() => setSquadOpen(false)} style={{ ...btnGhost, width: '100%' }}>Close</button>
-          </div>
-        </div>
-      )}
+          </>
+        );
+      })()}
 
       {/* ── Allocate GK: pick a player to take over in goal ── */}
       {gkPickerOpen && (
@@ -1429,197 +1765,169 @@ export default function TeamSheetView({
         // Once this period has any elapsed time, a whole-period rewrite would
         // falsify minutes already played (the Round-8 bug class) — block it.
         const periodUnderway = gameClock.currentSegIdx === currentSeg && elapsedMs > 0;
+        const shown = Number.isFinite(mins) ? mins : Math.max(1, Math.round(seg.duration / 2));
+        const clamped = Math.min(Math.max(shown, 1), Math.max(1, seg.duration - 1));
+        const setMins = (v) => setSubPromptMins(String(Math.min(Math.max(v, 1), Math.max(1, seg.duration - 1))));
+        // Kickoff-relative start of this period. Summed from durations, not
+        // parsed out of seg.label — "H1 0–10" matches the 1 in "H1" first.
+        const from = segments.slice(0, currentSeg).reduce((a, x) => a + (x.duration || 0), 0);
+        const shortcuts = [
+          ['Right at the start', 1],
+          ['Halfway', Math.max(1, Math.round(seg.duration / 2))],
+          ['Nearly the whole period', Math.max(1, seg.duration - 1)],
+        ];
         return (
-          <div style={{ ...modalBackdrop, zIndex: 250 }}>
-            <div style={{ ...modalCard, maxWidth: s(480) }}>
-              <h2 style={modalTitle}>🔁 Make a Substitution</h2>
-              <div style={modalBody}>
-                The clock isn't timing this period, so I don't know how far in we are. Enter the minutes already played and I'll <strong style={{ color: UI.navy }}>lock everything before the sub</strong> — only the rest of the period changes.
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 250, background: UI.page,
+            display: 'flex', flexDirection: 'column', overflowY: 'auto',
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {/* Amber header, inheriting the 2a rule — the chrome states WHY it
+                is asking before the coach reads a word. */}
+            <div style={{
+              background: UI.warn, padding: `${s(18)}px ${s(26)}px`, flexShrink: 0,
+              display: 'flex', alignItems: 'baseline', gap: s(16), flexWrap: 'wrap',
+            }}>
+              <div style={{ fontSize: Math.max(30, s(52)), fontWeight: 800, color: '#fff', letterSpacing: -1, lineHeight: 1 }}>
+                {fmtCountdown(remainingSecsTotal)}
               </div>
+              <div style={{ fontSize: Math.max(15, s(19)), fontWeight: 900, color: UI.warnOnDark, letterSpacing: s(2) }}>
+                P{currentSeg + 1} · {seg.half === 1 ? '1ST HALF' : '2ND HALF'} · CLOCK NOT RUNNING
+              </div>
+            </div>
+
+            <div style={{ flex: 1, padding: `${s(26)}px ${s(30)}px`, maxWidth: s(1024), width: '100%', boxSizing: 'border-box' }}>
+              <div style={{ ...sectionLabel, color: UI.warn, marginBottom: s(8) }}>Before this change is made</div>
+              <div style={{ fontSize: Math.max(30, s(52)), fontWeight: 800, color: UI.navy, letterSpacing: -1, lineHeight: 1.1 }}>
+                How far into this period did it happen?
+              </div>
+              <div style={{ fontSize: Math.max(17, s(23)), fontWeight: 700, color: UI.bodyText, marginTop: s(12), lineHeight: 1.45 }}>
+                The clock wasn't timing P{currentSeg + 1}, so the app can't tell. Minutes already played
+                stay exactly as they are — this only changes what's left.
+              </div>
+
               {canSplit && (
                 <>
-                  <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>
-                    Minutes played this period (1–{seg.duration - 1})
-                  </label>
-                  <input
-                    type="number" min={1} max={seg.duration - 1} value={subPromptMins} autoFocus
-                    onChange={e => setSubPromptMins(e.target.value)}
-                    style={inputStyle}
-                  />
-                  <button
-                    disabled={!valid}
-                    onClick={confirmSubFromTime}
-                    style={{ ...btnSolid(valid ? UI.go : UI.label), width: '100%', marginTop: s(16), cursor: valid ? 'pointer' : 'default' }}>
-                    ✂️ Sub from {valid ? mins : '…'} min — lock the past
-                  </button>
+                  {/* The bar carries the argument: this is the visual form of
+                      splitSegment, and it is why the answer matters. */}
+                  <div style={{ ...sectionLabel, marginTop: s(24), marginBottom: s(10) }}>
+                    Period {currentSeg + 1} · minute {from} to {from + seg.duration}
+                  </div>
+                  <div style={{ display: 'flex', height: s(96), borderRadius: s(12), overflow: 'hidden', border: `3px solid ${UI.navy}` }}>
+                    <div style={{
+                      flex: clamped, background: UI.navy, color: '#fff',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minWidth: 0,
+                    }}>
+                      <div style={{ fontSize: Math.max(18, s(26)), fontWeight: 800, whiteSpace: 'nowrap' }}>{clamped} min played</div>
+                      <div style={{ fontSize: Math.max(15, s(16)), fontWeight: 900, letterSpacing: s(1), color: UI.onNavyMuted, whiteSpace: 'nowrap' }}>
+                        LOCKED — CAN'T CHANGE
+                      </div>
+                    </div>
+                    <div style={{
+                      flex: Math.max(0.0001, seg.duration - clamped), background: '#fff', color: UI.navy,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minWidth: 0,
+                    }}>
+                      <div style={{ fontSize: Math.max(18, s(26)), fontWeight: 800, whiteSpace: 'nowrap' }}>{seg.duration - clamped} min left</div>
+                      <div style={{ fontSize: Math.max(15, s(16)), fontWeight: 900, letterSpacing: s(1), color: UI.label, whiteSpace: 'nowrap' }}>
+                        THIS EDIT APPLIES HERE
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: s(6), fontSize: Math.max(15, s(17)), fontWeight: 900, color: UI.label }}>
+                    <span>{from} MIN</span><span>{from + clamped} MIN</span><span>{from + seg.duration} MIN</span>
+                  </div>
+
+                  {/* Clamped rather than disabled, so the control never feels stuck. */}
+                  <div style={{ display: 'flex', gap: s(12), alignItems: 'stretch', marginTop: s(20) }}>
+                    <button type="button" onClick={() => setMins(clamped - 1)} style={{
+                      width: s(108), height: s(108), borderRadius: s(14), background: '#fff',
+                      border: `3px solid ${UI.navy}`, color: UI.navy, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                      <div style={{ fontSize: Math.max(24, s(34)), fontWeight: 800, lineHeight: 1 }}>−</div>
+                      <div style={{ fontSize: Math.max(15, s(15)), fontWeight: 900, letterSpacing: s(1) }}>1 MIN</div>
+                    </button>
+                    <div style={{
+                      flex: 1, borderRadius: s(14), background: '#fff', border: `3px solid ${UI.blueLine}`,
+                      display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: s(10),
+                    }}>
+                      <span style={{ fontSize: Math.max(40, s(72)), fontWeight: 800, color: UI.navy, lineHeight: 1.4 }}>{clamped}</span>
+                      <span style={{ fontSize: Math.max(17, s(24)), fontWeight: 700, color: UI.bodyText }}>minutes played</span>
+                    </div>
+                    <button type="button" onClick={() => setMins(clamped + 1)} style={{
+                      width: s(108), height: s(108), borderRadius: s(14), background: '#fff',
+                      border: `3px solid ${UI.navy}`, color: UI.navy, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                      <div style={{ fontSize: Math.max(24, s(34)), fontWeight: 800, lineHeight: 1 }}>+</div>
+                      <div style={{ fontSize: Math.max(15, s(15)), fontWeight: 900, letterSpacing: s(1) }}>1 MIN</div>
+                    </button>
+                  </div>
+
+                  {/* "Halfway" is what a coach actually knows. */}
+                  <div style={{ display: 'flex', gap: s(12), marginTop: s(14), flexWrap: 'wrap' }}>
+                    {shortcuts.map(([label, v]) => {
+                      const sel = clamped === v;
+                      return (
+                        <button key={label} type="button" onClick={() => setMins(v)} style={{
+                          flex: '1 1 30%', padding: `${s(16)}px ${s(12)}px`, borderRadius: s(12),
+                          background: sel ? UI.navy : '#fff', border: `3px solid ${sel ? UI.navy : UI.blueLine}`,
+                          color: sel ? '#fff' : UI.navy, fontSize: Math.max(17, s(22)), fontWeight: 800,
+                          cursor: 'pointer', fontFamily: 'inherit',
+                        }}>{label}{sel ? ' ✓' : ''}</button>
+                      );
+                    })}
+                  </div>
                 </>
               )}
+
+              {/* A prompt that cannot be answered confidently gets dismissed
+                  carelessly, which is the same bug wearing a hat. */}
+              <div style={{
+                marginTop: s(22), padding: `${s(18)}px ${s(22)}px`, borderRadius: s(14),
+                background: UI.warnTint, border: `3px solid ${UI.warn}`,
+              }}>
+                <div style={{ ...sectionLabel, color: UI.warn, marginBottom: s(6) }}>If you get this wrong</div>
+                <div style={{ fontSize: Math.max(17, s(22)), fontWeight: 700, color: UI.warnText, lineHeight: 1.45 }}>
+                  Everyone's minutes for the day shift by the same amount you're out by. Say
+                  {' '}{Math.max(1, Math.round(seg.duration / 2))} if you're not sure — half a period is the safest
+                  guess, and you can correct it from the season screen after the game.
+                </div>
+              </div>
+
+              {/* Session 12, Issue 5: the whole-period escape hatch stays, and
+                  stays disabled once the period has elapsed time — that rewrite
+                  would falsify minutes already played (the Round-8 bug class). */}
               <button
+                type="button"
                 onClick={editWholePeriod}
                 disabled={periodUnderway}
                 style={{
-                  ...btnGhost, width: '100%', marginTop: s(10),
+                  ...btnGhost, width: '100%', marginTop: s(16),
                   borderColor: periodUnderway ? UI.blueLine : UI.warn,
                   color: periodUnderway ? UI.label : UI.warnText,
                   background: periodUnderway ? '#fff' : UI.warnTint,
                   cursor: periodUnderway ? 'not-allowed' : 'pointer',
                 }}>
-                ⚠️ Change the whole period instead
+                Change the whole period instead
               </button>
-              <div style={{ fontSize: Math.max(13, s(16)), fontWeight: 700, color: UI.warnText, marginTop: s(6), lineHeight: 1.4 }}>
+              <div style={{ fontSize: Math.max(15, s(17)), fontWeight: 700, color: UI.warnText, marginTop: s(6), lineHeight: 1.4 }}>
                 {periodUnderway
-                  ? `This period is underway — a whole-period change would rewrite the ${Math.floor(elapsedMs / 60000)}+ minutes already played. Use the sub-from-time option above.`
+                  ? `This period is underway — a whole-period change would rewrite the ${Math.floor(elapsedMs / 60000)}+ minutes already played. Use the minutes above.`
                   : `"Whole period" rewrites who's on for all ${seg.duration} minutes — only for periods that haven't started yet.`}
               </div>
-              <button
-                onClick={() => { setSubPrompt(false); pendingSwapRef.current = null; }}
-                style={{ ...btnGhost, width: '100%', marginTop: s(12) }}>
-                Cancel
+            </div>
+
+            <div style={{ flexShrink: 0, display: 'flex', gap: s(14), padding: `${s(16)}px ${s(30)}px ${s(26)}px`, maxWidth: s(1024), width: '100%', boxSizing: 'border-box' }}>
+              <button type="button" onClick={() => { setSubPrompt(false); pendingSwapRef.current = null; }}
+                style={{ ...btnGhost, flex: 1, height: s(92) }}>
+                Cancel the change
               </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── Late player: name input + confirm ── */}
-      {latePlayerOpen && (() => {
-        const trimmed = latePlayerName.trim();
-        // Compare against the ACTIVE squad (segment-derived), not players —
-        // a previously-removed name is allowed to come back as a new arrival.
-        const activeNames = new Set();
-        Object.values(seg.assignment).forEach(n => { if (n) activeNames.add(n); });
-        seg.bench.forEach(n => { if (n) activeNames.add(n); });
-        const dup = activeNames.has(trimmed);
-        const tooMany = activeSquadSize >= 12;
-        const valid = trimmed.length > 0 && !dup && !tooMany;
-        const elapsedMins = Math.floor(elapsedMs / 60000);
-        const elapsedSecs = Math.floor((elapsedMs % 60000) / 1000);
-        return (
-          <div style={{ ...modalBackdrop, zIndex: 250 }}>
-            <div style={{ ...modalCard, maxWidth: s(480) }}>
-              <h2 style={modalTitle}>➕ Late Player</h2>
-              <div style={modalBody}>
-                Add a player to the squad. The schedule will be replanned from the current clock time. They get equal share of the remaining game — no catch-up.
-              </div>
-              <input
-                value={latePlayerName}
-                onChange={e => setLatePlayerName(e.target.value)}
-                placeholder="Player name"
-                autoFocus
-                style={inputStyle}
-              />
-              {trimmed && (
-                <div style={{
-                  marginTop: s(14), padding: `${s(12)}px ${s(16)}px`, borderRadius: s(12),
-                  background: dup || tooMany ? '#fdecec' : UI.goTint,
-                  border: `2px solid ${dup || tooMany ? UI.stop : UI.go}`,
-                  fontSize: Math.max(14, s(18)), fontWeight: 700,
-                  color: dup || tooMany ? UI.stop : UI.go,
-                }}>
-                  {dup
-                    ? `${trimmed} is already in the squad.`
-                    : tooMany
-                      ? `Maximum is 12 players (already at ${activeSquadSize}).`
-                      : `Squad will go from ${activeSquadSize} → ${activeSquadSize + 1}. Splitting at ${elapsedMins}:${String(elapsedSecs).padStart(2, '0')}.`}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: s(12), marginTop: s(20) }}>
-                <button onClick={() => setLatePlayerOpen(false)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
-                <button
-                  disabled={!valid}
-                  onClick={() => {
-                    onRosterChange?.({ type: 'add', name: trimmed });
-                    setLatePlayerOpen(false);
-                  }}
-                  style={{ ...btnSolid(valid ? UI.go : UI.label), flex: 2, cursor: valid ? 'pointer' : 'not-allowed' }}>
-                  ➕ Add Player
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── Player out: pick player (and replacement if on field) + confirm ── */}
-      {playerOutOpen && (() => {
-        const onField = playerOutName && Object.values(seg.assignment).includes(playerOutName);
-        const isCurrentGK = playerOutName && seg.assignment.GK === playerOutName;
-        // Active squad = current segment's field + bench (excludes anyone
-        // already removed by an earlier injury). The player dropdown should
-        // only offer active players.
-        const activeNamesOut = new Set();
-        Object.values(seg.assignment).forEach(n => { if (n) activeNamesOut.add(n); });
-        seg.bench.forEach(n => { if (n) activeNamesOut.add(n); });
-        const activePlayerList = players.filter(p => activeNamesOut.has(p));
-        const wouldDropBelowSix = activeSquadSize - 1 < 6;
-        const benchOptions = seg.bench;
-        const elapsedMins = Math.floor(elapsedMs / 60000);
-        const elapsedSecs = Math.floor((elapsedMs % 60000) / 1000);
-        const valid = playerOutName && !isCurrentGK && !wouldDropBelowSix && (!onField || benchOptions.length > 0 || activeSquadSize - 1 < 9);
-        return (
-          <div style={{ ...modalBackdrop, zIndex: 250 }}>
-            <div style={{ ...modalCard, maxWidth: s(480) }}>
-              <h2 style={modalTitle}>➖ Player Out</h2>
-              <div style={modalBody}>
-                Remove a player from the rest of the game (e.g. injury). Their minutes already played are kept. The schedule will be replanned for the remainder.
-              </div>
-
-              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>Player leaving</label>
-              <select
-                value={playerOutName}
-                onChange={e => { setPlayerOutName(e.target.value); setPlayerOutReplacement(''); }}
-                style={{ ...inputStyle, cursor: 'pointer' }}>
-                <option value="">— Select Player —</option>
-                {activePlayerList.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-
-              {onField && benchOptions.length > 0 && (
-                <>
-                  <label style={{ ...sectionLabel, display: 'block', marginTop: s(16), marginBottom: s(8) }}>Who comes on?</label>
-                  <select
-                    value={playerOutReplacement}
-                    onChange={e => setPlayerOutReplacement(e.target.value)}
-                    style={{ ...inputStyle, cursor: 'pointer' }}>
-                    <option value="">— Pick most-rested —</option>
-                    {benchOptions.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </>
-              )}
-
-              {playerOutName && (
-                <div style={{
-                  marginTop: s(14), padding: `${s(12)}px ${s(16)}px`, borderRadius: s(12),
-                  background: !valid ? '#fdecec' : UI.warnTint,
-                  border: `2px solid ${!valid ? UI.stop : UI.warn}`,
-                  fontSize: Math.max(14, s(18)), fontWeight: 700,
-                  color: !valid ? UI.stop : UI.warnText,
-                }}>
-                  {isCurrentGK
-                    ? 'This player is the current goalkeeper. Use the GK button first to swap goalkeeper, then mark them out.'
-                    : wouldDropBelowSix
-                      ? `Cannot drop below 6 players (currently ${activeSquadSize}).`
-                      : onField && benchOptions.length === 0 && activeSquadSize - 1 >= 9
-                        ? 'No bench players available to swap on.'
-                        : `Squad will go from ${activeSquadSize} → ${activeSquadSize - 1}. Splitting at ${elapsedMins}:${String(elapsedSecs).padStart(2, '0')}. ${onField ? `${playerOutReplacement || '(most-rested bench player)'} comes on.` : `${playerOutName} was on the bench.`}`}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', gap: s(12), marginTop: s(20) }}>
-                <button onClick={() => setPlayerOutOpen(false)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
-                <button
-                  disabled={!valid}
-                  onClick={() => {
-                    onRosterChange?.({
-                      type: 'remove',
-                      name: playerOutName,
-                      replacementOnField: playerOutReplacement || undefined,
-                    });
-                    setPlayerOutOpen(false);
-                  }}
-                  style={{ ...btnSolid(valid ? UI.stop : UI.label), flex: 2, cursor: valid ? 'pointer' : 'not-allowed' }}>
-                  ➖ Mark Out
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled={!canSplit}
+                onClick={() => { setSubPromptMins(String(clamped)); confirmSubFromTime(clamped); }}
+                style={{ ...btnSolid(canSplit ? UI.navy : UI.label), flex: 2, height: s(92), cursor: canSplit ? 'pointer' : 'not-allowed' }}>
+                {clamped} MINUTE{clamped === 1 ? '' : 'S'} IN — CARRY ON →
+              </button>
             </div>
           </div>
         );
