@@ -1,22 +1,30 @@
 /**
  * SeasonView — the Season Tracker screen.
- * Lists all saved games, shows aggregate stats, and handles
- * export / import / delete / edit-goals.
+ *
+ * Session 14: the 11-column table is gone. It could not be read on a phone or
+ * in sun, which meant the fairness data — the whole point of the app — was
+ * effectively invisible. It is replaced by one sorted list per tab. Nothing was
+ * deleted; bench minutes, GK splits, goals, assists, POTM, captain and top
+ * positions all moved to the HONOURS / GOALS tabs and the per-match expansion.
  */
-import { useState, useRef } from 'react';
-import { POSITIONS, POS_BG, POS_TEXT, POS_BORDER, STORAGE_KEY } from '../constants.js';
+import { useState, useRef, useMemo } from 'react';
+import { POS_BG, STORAGE_KEY, UI } from '../constants.js';
+import useScale from '../useScale.js';
 
 export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearAll, onUpdateGame, onGoSetup }) {
-  const [confirmIdx, setConfirmIdx]     = useState(null); 
-  const [editIdx, setEditIdx]           = useState(null); 
-  const [expandedIdx, setExpandedIdx]   = useState(null); 
-  const [editGoals, setEditGoals]             = useState({});
-  const [editAssists, setEditAssists]         = useState({});
-  const [editPotm, setEditPotm]               = useState('');
-  const [editCaptain, setEditCaptain]         = useState('');
-  const [editOurScore, setEditOurScore]       = useState('');
-  const [editOppScore, setEditOppScore]       = useState('');
-  const [editNotes, setEditNotes]             = useState('');
+  const { s } = useScale();
+
+  const [tab, setTab]                   = useState('fairness');
+  const [confirmIdx, setConfirmIdx]     = useState(null);
+  const [editIdx, setEditIdx]           = useState(null);
+  const [expandedIdx, setExpandedIdx]   = useState(null);
+  const [editGoals, setEditGoals]       = useState({});
+  const [editAssists, setEditAssists]   = useState({});
+  const [editPotm, setEditPotm]         = useState('');
+  const [editCaptain, setEditCaptain]   = useState('');
+  const [editOurScore, setEditOurScore] = useState('');
+  const [editOppScore, setEditOppScore] = useState('');
+  const [editNotes, setEditNotes]       = useState('');
   const [importMsg, setImportMsg]       = useState(null);
   const importRef                       = useRef(null);
 
@@ -73,485 +81,642 @@ export default function SeasonView({ seasonGames, onBack, onDeleteGame, onClearA
   };
 
   // ── Season totals ─────────────────────────────────────────────────────────
-  const allPlayers  = [...new Set(seasonGames.flatMap(g => g.players))];
-  const totals      = Object.fromEntries(allPlayers.map(p => [p, {
-    minutes: 0, benchMins: 0, gkH1: 0, gkH2: 0, games: 0, goals: 0, assists: 0, potm: 0,
-    captainGames: 0, posCount: {},
-  }]));
+  const { allPlayers, totals, record, goalsFor, goalsAgainst } = useMemo(() => {
+    const names  = [...new Set(seasonGames.flatMap(g => g.players))];
+    const tot    = Object.fromEntries(names.map(p => [p, {
+      minutes: 0, benchMins: 0, gkH1: 0, gkH2: 0, games: 0, goals: 0, assists: 0, potm: 0,
+      captainGames: 0, posCount: {},
+    }]));
 
-  seasonGames.forEach(game => {
-    const { minutesMap, playerSchedule } = game.stats || {};
+    seasonGames.forEach(game => {
+      const { minutesMap, playerSchedule } = game.stats || {};
 
-    // Per-game GK by half (Sets avoid double-counting multi-seg halves)
-    const gkH1Set = new Set(
-      (game.segments || []).filter(s => s.half === 1).map(s => s.assignment?.GK).filter(Boolean)
-    );
-    const gkH2Set = new Set(
-      (game.segments || []).filter(s => s.half === 2).map(s => s.assignment?.GK).filter(Boolean)
-    );
+      // Per-game GK by half (Sets avoid double-counting multi-seg halves)
+      const gkH1Set = new Set(
+        (game.segments || []).filter(sg => sg.half === 1).map(sg => sg.assignment?.GK).filter(Boolean)
+      );
+      const gkH2Set = new Set(
+        (game.segments || []).filter(sg => sg.half === 2).map(sg => sg.assignment?.GK).filter(Boolean)
+      );
 
-    game.players.forEach(p => {
-      if (!totals[p]) return;
-      if (minutesMap?.[p] != null) {
-        totals[p].minutes += minutesMap[p];
-        totals[p].games   += 1;
-        if (gkH1Set.has(p)) totals[p].gkH1++;
-        if (gkH2Set.has(p)) totals[p].gkH2++;
-        // Bench minutes: sum duration of every segment where this player is on the bench
-        (game.segments || []).forEach(seg => {
-          if (seg.bench?.includes(p)) totals[p].benchMins += (seg.duration || 0);
-        });
-        new Set((playerSchedule?.[p] || []).filter(s => s && s !== 'BENCH')).forEach(pos => {
-          totals[p].posCount[pos] = (totals[p].posCount[pos] || 0) + 1;
-        });
-      }
+      game.players.forEach(p => {
+        if (!tot[p]) return;
+        if (minutesMap?.[p] != null) {
+          tot[p].minutes += minutesMap[p];
+          tot[p].games   += 1;
+          if (gkH1Set.has(p)) tot[p].gkH1++;
+          if (gkH2Set.has(p)) tot[p].gkH2++;
+          // Bench minutes: sum duration of every segment where this player is benched
+          (game.segments || []).forEach(sg => {
+            if (sg.bench?.includes(p)) tot[p].benchMins += (sg.duration || 0);
+          });
+          new Set((playerSchedule?.[p] || []).filter(x => x && x !== 'BENCH')).forEach(pos => {
+            tot[p].posCount[pos] = (tot[p].posCount[pos] || 0) + 1;
+          });
+        }
+      });
+      if (game.goals)   Object.entries(game.goals).forEach(([p, n]) => { if (tot[p]) tot[p].goals += n; });
+      if (game.assists) Object.entries(game.assists).forEach(([p, n]) => { if (tot[p]) tot[p].assists += n; });
+      if (game.potm    && tot[game.potm])    tot[game.potm].potm++;
+      if (game.captain && tot[game.captain]) tot[game.captain].captainGames++;
     });
-    if (game.goals)   Object.entries(game.goals).forEach(([p, n]) => { if (totals[p]) totals[p].goals += n; });
-    if (game.assists) Object.entries(game.assists).forEach(([p, n]) => { if (totals[p]) totals[p].assists += n; });
-    if (game.potm    && totals[game.potm])    totals[game.potm].potm++;
-    if (game.captain && totals[game.captain]) totals[game.captain].captainGames++;
+
+    const rec = seasonGames.reduce((acc, g) => {
+      if (g.result === 'W') acc.w++;
+      else if (g.result === 'D') acc.d++;
+      else if (g.result === 'L') acc.l++;
+      return acc;
+    }, { w: 0, d: 0, l: 0 });
+
+    const gf = seasonGames.reduce((n, g) => n + (g.ourScore ?? 0), 0);
+    const ga = seasonGames.reduce((n, g) => n + (g.oppositionScore ?? 0), 0);
+
+    return { allPlayers: names, totals: tot, record: rec, goalsFor: gf, goalsAgainst: ga };
+  }, [seasonGames]);
+
+  const avgOf = (p) => (totals[p]?.games > 0 ? totals[p].minutes / totals[p].games : 0);
+
+  // Fairness list — descending by average minutes, so the player who has been
+  // shortchanged sits at the bottom and is flagged.
+  const fairness = useMemo(() => {
+    const rows = allPlayers
+      .map(p => ({ name: p, avg: Math.round(avgOf(p)), t: totals[p] }))
+      .sort((a, b) => b.avg - a.avg);
+    return rows;
+  }, [allPlayers, totals]);
+
+  const maxAvg = fairness.length ? Math.max(...fairness.map(r => r.avg), 1) : 1;
+  const lowAvg = fairness.length ? fairness[fairness.length - 1].avg : 0;
+  const targetAvg = fairness.length
+    ? Math.round(fairness.reduce((n, r) => n + r.avg, 0) / fairness.length)
+    : 0;
+
+  // The three players furthest behind on minutes. Deliberately worded as a
+  // statement of fact, not a promise about what buildSchedule will do — the
+  // generator shuffles positions and the coach can override any of it.
+  const behind = useMemo(
+    () => [...fairness].reverse().slice(0, 3).map(r => r.name),
+    [fairness]
+  );
+
+  // Most-played position, for the wristband swatch on each row.
+  const topPos = (p) => {
+    const counts = totals[p]?.posCount || {};
+    const entry = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    return entry ? entry[0] : null;
+  };
+
+  // ── Shared styles ─────────────────────────────────────────────────────────
+  const sectionLabel = {
+    fontSize: Math.max(13, s(18)), fontWeight: 900, letterSpacing: s(2),
+    color: UI.label, textTransform: 'uppercase',
+  };
+  const card = {
+    background: '#fff', border: `2px solid ${UI.blueLine}`, borderRadius: s(12),
+  };
+  const btnOnNavy = {
+    border: `2px solid ${UI.onNavyBorder}`, borderRadius: s(10),
+    padding: `${s(12)}px ${s(22)}px`, fontSize: Math.max(15, s(20)),
+    fontWeight: 800, color: '#fff', background: 'transparent',
+    cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+  };
+  const btnGhost = {
+    padding: s(16), borderRadius: s(12), background: '#fff',
+    border: `3px solid ${UI.blueLine}`, color: UI.bodyText,
+    fontSize: Math.max(15, s(20)), fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit',
+  };
+  const btnSolid = (bg) => ({
+    padding: s(16), borderRadius: s(12), background: bg, border: 'none',
+    color: '#fff', fontSize: Math.max(15, s(20)), fontWeight: 900,
+    cursor: 'pointer', fontFamily: 'inherit',
   });
+  const inputStyle = {
+    width: '100%', padding: s(14), borderRadius: s(12),
+    border: `3px solid ${UI.blueLine}`, fontSize: Math.max(16, s(22)),
+    fontWeight: 700, color: UI.navy, background: '#fff',
+    boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit',
+  };
+  const modalBackdrop = {
+    position: 'fixed', inset: 0, background: UI.backdrop, zIndex: 999,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: s(24), boxSizing: 'border-box',
+  };
+  const modalCard = {
+    background: '#fff', borderRadius: s(24), padding: s(30), maxWidth: s(560),
+    width: '100%', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box',
+  };
 
-  // ── Season record (W/D/L) ─────────────────────────────────────────────────
-  const record = seasonGames.reduce((acc, g) => {
-    if (g.result === 'W') acc.w++;
-    else if (g.result === 'D') acc.d++;
-    else if (g.result === 'L') acc.l++;
-    return acc;
-  }, { w: 0, d: 0, l: 0 });
-  const hasRecord = record.w + record.d + record.l > 0;
-
-  // Calculate true fairness metrics
-  const maxAvgMins = Math.max(...allPlayers.map(p => totals[p].games > 0 ? totals[p].minutes / totals[p].games : 0));
-  const maxGoals   = Math.max(...allPlayers.map(p => totals[p]?.goals   || 0));
-  const maxAssists = Math.max(...allPlayers.map(p => totals[p]?.assists || 0));
+  const swatch = (pos) => ({
+    width: s(14), height: s(34), borderRadius: s(4), flexShrink: 0,
+    background: POS_BG[pos] || UI.track,
+    boxShadow: (POS_BG[pos] || '').toLowerCase() === '#ffffff'
+      ? `inset 0 0 0 2px ${UI.blueLine}` : 'none',
+  });
 
   // ── Empty state ───────────────────────────────────────────────────────────
   if (seasonGames.length === 0) return (
-    <div style={{ padding: 40, textAlign: 'center', color: '#4a6b8a', minHeight: '100vh', background: '#f0f6ff', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ fontSize: 48, marginBottom: 12 }}>📅</div>
-      <div style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginBottom: 8 }}>
-        No Games Recorded Yet
+    <div style={{
+      padding: s(40), textAlign: 'center', color: UI.bodyText, minHeight: '100vh',
+      background: UI.page, fontFamily: 'system-ui, "Segoe UI", sans-serif',
+    }}>
+      <div style={{ fontSize: s(48), marginBottom: s(12) }}>📅</div>
+      <div style={{ fontSize: Math.max(22, s(34)), fontWeight: 800, color: UI.navy, marginBottom: s(8) }}>
+        No games recorded yet
       </div>
-      <div style={{ fontSize: 16, color: '#4a6b8a', fontWeight: 600 }}>
-        Play a game and hit "Save to Season" to build your dashboard.
+      <div style={{ fontSize: Math.max(15, s(20)), color: UI.bodyText, fontWeight: 700 }}>
+        Play a game and hit SAVE to build your season.
       </div>
-      <button onClick={onBack} style={{ marginTop: 24, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', padding: '16px 32px', cursor: 'pointer', fontSize: 18, fontWeight: 900, boxShadow: '0 8px 24px rgba(29,111,207,0.3)' }}>
+      <button onClick={onBack} style={{ ...btnSolid(UI.navy), marginTop: s(24), padding: `${s(16)}px ${s(32)}px` }}>
         ← Back to Match Setup
       </button>
     </div>
   );
 
-  return (
-    <div style={{ minHeight: '100vh', background: '#f0f6ff', fontFamily: 'system-ui, sans-serif' }}>
-      
-      {/* ── Header ── */}
-      <header style={{ background: 'linear-gradient(135deg, #1d6fcf 0%, #0f2d5a 100%)', padding: '32px 24px 24px', textAlign: 'center', position: 'relative' }}>
-        <button onClick={onBack} style={{ position: 'absolute', left: 24, top: 32, background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', borderRadius: 12, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 16, fontWeight: 800 }}>
-          ← Back
-        </button>
-        <div style={{ fontSize: 48, marginBottom: 8 }}>⚖️</div>
-        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 900, color: '#fff', letterSpacing: -0.5 }}>
-          Season Fairness Tracker
-        </h1>
-        <p style={{ margin: '8px 0 0', color: '#c7daf7', fontSize: 16, fontWeight: 600 }}>
-          {seasonGames.length} Game{seasonGames.length !== 1 ? 's' : ''} Recorded
-        </p>
+  const tabs = [
+    { key: 'fairness', label: 'FAIRNESS' },
+    { key: 'matches',  label: 'MATCHES' },
+    { key: 'honours',  label: 'HONOURS' },
+    { key: 'goals',    label: 'GOALS' },
+  ];
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24, flexWrap: 'wrap' }}>
-          {onGoSetup && (
-            <button onClick={onGoSetup} style={{ background: '#f59e0b', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 900, boxShadow: '0 4px 12px rgba(245,158,11,0.3)' }}>
-              ➕ Start New Match
-            </button>
-          )}
-          <button onClick={handleExport} style={{ background: '#059669', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800 }}>
-            📤 Export Backup
-          </button>
-          <label style={{ background: 'rgba(255,255,255,0.1)', border: '2px solid rgba(255,255,255,0.3)', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800, display: 'inline-block' }}>
-            📥 Import Backup
-            <input ref={importRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
-          </label>
-          <button onClick={() => setConfirmIdx('all')} style={{ background: '#dc2626', border: 'none', borderRadius: 8, color: '#fff', padding: '10px 20px', cursor: 'pointer', fontSize: 14, fontWeight: 800 }}>
-            🗑 Reset Season
-          </button>
+  return (
+    <div style={{
+      minHeight: '100vh', background: UI.page, color: UI.navy,
+      fontFamily: 'system-ui, "Segoe UI", sans-serif',
+      fontVariantNumeric: 'tabular-nums',
+      display: 'flex', flexDirection: 'column',
+    }}>
+
+      {/* ══ Header ══ */}
+      <header style={{ background: UI.navy, padding: `${s(22)}px ${s(26)}px ${s(20)}px`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: s(12), flexWrap: 'wrap' }}>
+          <button onClick={onBack} style={btnOnNavy}>← Back to game</button>
+          <div style={{ display: 'flex', gap: s(10) }}>
+            <button onClick={handleExport} style={btnOnNavy}>📤 Export</button>
+            <label style={{ ...btnOnNavy, display: 'inline-block' }}>
+              📥 Import
+              <input ref={importRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+            </label>
+          </div>
+        </div>
+
+        <h1 style={{
+          margin: `${s(14)}px 0 ${s(8)}px`, fontSize: Math.max(30, s(46)), fontWeight: 800,
+          color: '#fff', letterSpacing: -1,
+        }}>
+          Season {new Date().getFullYear()}
+        </h1>
+        <div style={{ display: 'flex', gap: s(20), alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: Math.max(16, s(24)), fontWeight: 700, color: UI.onNavyMuted }}>
+            {seasonGames.length} game{seasonGames.length !== 1 ? 's' : ''}
+          </span>
+          <span style={{ fontSize: Math.max(16, s(24)), fontWeight: 800, color: '#fff' }}>
+            {record.w} W · {record.d} D · {record.l} L
+          </span>
+          <span style={{ fontSize: Math.max(16, s(24)), fontWeight: 700, color: UI.onNavyMuted }}>
+            {goalsFor} goals for · {goalsAgainst} against
+          </span>
         </div>
       </header>
 
+      {/* ══ Tabs ══ */}
+      <div style={{
+        background: '#fff', padding: `${s(14)}px ${s(20)}px`,
+        borderBottom: `2px solid ${UI.blueLine}`, flexShrink: 0,
+        display: 'flex', gap: s(10), overflowX: 'auto',
+      }}>
+        {tabs.map(t => {
+          const on = tab === t.key;
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{
+              background: on ? UI.navy : '#fff',
+              border: on ? '2px solid transparent' : `2px solid ${UI.blueLine}`,
+              color: on ? '#fff' : UI.bodyText,
+              fontWeight: on ? 900 : 800,
+              borderRadius: s(10), padding: `${s(14)}px ${s(28)}px`,
+              fontSize: Math.max(16, s(22)), cursor: 'pointer',
+              fontFamily: 'inherit', whiteSpace: 'nowrap',
+            }}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       {importMsg && (
-        <div style={{ margin: '16px auto', maxWidth: 840, padding: '12px 16px', borderRadius: 12, background: importMsg.type === 'err' ? '#fee2e2' : '#ecfdf5', border: `2px solid ${importMsg.type === 'err' ? '#f87171' : '#059669'}`, color: importMsg.type === 'err' ? '#b91c1c' : '#059669', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>
+        <div style={{
+          margin: `${s(14)}px ${s(20)}px 0`, padding: `${s(14)}px ${s(18)}px`, borderRadius: s(12),
+          background: importMsg.type === 'err' ? '#fdecec' : UI.goTint,
+          border: `2px solid ${importMsg.type === 'err' ? UI.stop : UI.go}`,
+          color: importMsg.type === 'err' ? UI.stop : UI.go,
+          fontSize: Math.max(14, s(19)), fontWeight: 800, textAlign: 'center', flexShrink: 0,
+        }}>
           {importMsg.msg}
         </div>
       )}
 
-      <div style={{ maxWidth: 1000, margin: '0 auto', padding: '24px 16px 60px' }}>
+      {/* ══ Body ══ */}
+      <div style={{ flex: 1, minHeight: 0, padding: `${s(20)}px ${s(20)}px ${s(8)}px`, overflowY: 'auto' }}>
 
-        {/* ── Season Record ── */}
-        {hasRecord && (
-          <div style={{ background: '#ffffff', borderRadius: 20, padding: '20px 24px', border: '3px solid #e2ecfc', marginBottom: 24, boxShadow: '0 10px 30px rgba(15,45,90,0.05)', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, flexShrink: 0 }}>SEASON RECORD</div>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px', borderRadius: 14, background: '#ecfdf5', border: '3px solid #6ee7b7', minWidth: 64 }}>
-                <span style={{ fontSize: 28, fontWeight: 900, color: '#059669' }}>{record.w}</span>
-                <span style={{ fontSize: 11, fontWeight: 900, color: '#059669', letterSpacing: 1 }}>WIN{record.w !== 1 ? 'S' : ''}</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px', borderRadius: 14, background: '#fffbeb', border: '3px solid #fcd34d', minWidth: 64 }}>
-                <span style={{ fontSize: 28, fontWeight: 900, color: '#b45309' }}>{record.d}</span>
-                <span style={{ fontSize: 11, fontWeight: 900, color: '#b45309', letterSpacing: 1 }}>DRAW{record.d !== 1 ? 'S' : ''}</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 20px', borderRadius: 14, background: '#fee2e2', border: '3px solid #fca5a5', minWidth: 64 }}>
-                <span style={{ fontSize: 28, fontWeight: 900, color: '#dc2626' }}>{record.l}</span>
-                <span style={{ fontSize: 11, fontWeight: 900, color: '#dc2626', letterSpacing: 1 }}>LOSS{record.l !== 1 ? 'ES' : ''}</span>
-              </div>
+        {/* ── FAIRNESS ── */}
+        {tab === 'fairness' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: s(12), gap: s(12), flexWrap: 'wrap' }}>
+              <span style={sectionLabel}>Average minutes per game</span>
+              <span style={{ fontSize: Math.max(14, s(18)), fontWeight: 800, color: UI.bodyText }}>
+                Spread {lowAvg}–{maxAvg}m · target {targetAvg}m
+              </span>
             </div>
-            <div style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 800, color: '#4a6b8a' }}>
-              {record.w + record.d + record.l} of {seasonGames.length} game{seasonGames.length !== 1 ? 's' : ''} with results
-            </div>
-          </div>
-        )}
-
-        {/* ── Season Totals Leaderboard (FAIRNESS FIRST) ── */}
-        {allPlayers.length > 0 && (
-          <div style={{ background: '#ffffff', borderRadius: 20, padding: '24px', border: '3px solid #e2ecfc', marginBottom: 32, boxShadow: '0 10px 30px rgba(15,45,90,0.05)' }}>
-            <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginBottom: 16 }}>FAIRNESS & ROTATION TRACKER</div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                <thead>
-                  <tr>
-                    {/* Fairness metrics brought to the front */}
-                    {['Player','Games','Mins / Game','Bench','GK H1','GK H2','Goals','Assists','POTM','Captain','Top Positions'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#64748b', fontWeight: 800, fontSize: 12, borderBottom: '3px solid #e2ecfc', whiteSpace: 'nowrap' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {allPlayers
-                    .sort((a, b) => {
-                      // Sort by average minutes so the fairest rotation sits at the top
-                      const avgA = totals[a].games > 0 ? totals[a].minutes / totals[a].games : 0;
-                      const avgB = totals[b].games > 0 ? totals[b].minutes / totals[b].games : 0;
-                      return avgB - avgA;
-                    })
-                    .map(p => {
-                      const t = totals[p];
-                      const avgMins = t.games > 0 ? Math.round(t.minutes / t.games) : 0;
-                      
-                      // Pull the top 3 positions this kid has played
-                      const topPositions = Object.entries(t.posCount)
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 3)
-                        .map(entry => entry[0])
-                        .join(', ');
-
-                      return (
-                        <tr key={p}>
-                          {/* Player name */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap' }}>
-                            <div style={{ color: '#0f2d5a', fontWeight: 900, fontSize: 16 }}>{p}{t.potm > 0 ? ' ⭐' : ''}</div>
-                          </td>
-
-                          {/* Attendance */}
-                          <td style={{ padding: '12px', color: '#64748b', fontWeight: 700, borderBottom: '1px solid #e2ecfc' }}>{t.games}</td>
-
-                          {/* TRUE Fairness Metric: Avg Minutes per Game */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 160 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span style={{ color: '#0f2d5a', fontWeight: 800, width: 40 }}>{avgMins}m</span>
-                              <div style={{ flex: 1, height: 8, background: '#e2ecfc', borderRadius: 4 }}>
-                                <div style={{ height: '100%', borderRadius: 4, background: '#1d6fcf', width: `${maxAvgMins > 0 ? (avgMins / maxAvgMins) * 100 : 0}%`, transition: 'width 0.5s' }} />
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Fairness: Bench Minutes */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
-                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.benchMins > 0 ? '#fef3c7' : '#f1f5f9', color: t.benchMins > 0 ? '#b45309' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
-                              {t.benchMins > 0 ? `${t.benchMins}m` : '—'}
-                            </span>
-                          </td>
-
-                          {/* Fairness: GK H1 */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
-                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.gkH1 > 0 ? '#f3e8ff' : '#f1f5f9', color: t.gkH1 > 0 ? '#7c3aed' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
-                              {t.gkH1 > 0 ? t.gkH1 : '—'}
-                            </span>
-                          </td>
-
-                          {/* Fairness: GK H2 */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc' }}>
-                            <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 6, background: t.gkH2 > 0 ? '#f3e8ff' : '#f1f5f9', color: t.gkH2 > 0 ? '#7c3aed' : '#94a3b8', fontWeight: 900, fontSize: 14 }}>
-                              {t.gkH2 > 0 ? t.gkH2 : '—'}
-                            </span>
-                          </td>
-
-                          {/* Glory: Goals */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 100 }}>
-                            {t.goals > 0 ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: '#d97706', fontWeight: 900, width: 20 }}>{t.goals}</span>
-                                <div style={{ flex: 1, height: 6, background: '#fef3c7', borderRadius: 3 }}>
-                                  <div style={{ height: '100%', borderRadius: 3, background: '#f59e0b', width: `${maxGoals > 0 ? (t.goals / maxGoals) * 100 : 0}%` }} />
-                                </div>
-                              </div>
-                            ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
-                          </td>
-
-                          {/* Glory: Assists */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', minWidth: 100 }}>
-                            {t.assists > 0 ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: '#059669', fontWeight: 900, width: 20 }}>{t.assists}</span>
-                                <div style={{ flex: 1, height: 6, background: '#d1fae5', borderRadius: 3 }}>
-                                  <div style={{ height: '100%', borderRadius: 3, background: '#059669', width: `${maxAssists > 0 ? (t.assists / maxAssists) * 100 : 0}%` }} />
-                                </div>
-                              </div>
-                            ) : <span style={{ color: '#cbd5e1', fontWeight: 700 }}>—</span>}
-                          </td>
-
-                          {/* POTM */}
-                          <td style={{ padding: '12px', color: '#d97706', fontWeight: 900, borderBottom: '1px solid #e2ecfc' }}>
-                            {t.potm > 0 ? `⭐ ×${t.potm}` : <span style={{ color: '#cbd5e1' }}>—</span>}
-                          </td>
-
-                          {/* Captain */}
-                          <td style={{ padding: '12px', fontWeight: 900, borderBottom: '1px solid #e2ecfc' }}>
-                            {t.captainGames > 0
-                              ? <span style={{ color: '#b45309' }}>🏅 ×{t.captainGames}</span>
-                              : <span style={{ color: '#cbd5e1' }}>—</span>}
-                          </td>
-
-                          {/* Top Positions */}
-                          <td style={{ padding: '12px', borderBottom: '1px solid #e2ecfc', whiteSpace: 'nowrap', color: '#4a6b8a', fontWeight: 700, fontSize: 13 }}>
-                            {topPositions || <span style={{ color: '#cbd5e1' }}>—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* ── Game History Cards ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 900, color: '#0f2d5a', letterSpacing: 1, marginLeft: 8 }}>MATCH HISTORY</div>
-          {seasonGames.map((game, idx) => {
-            const isExpanded = expandedIdx === idx;
-            const mins = Object.values(game.stats?.minutesMap || {});
-            const minMin = mins.length ? Math.min(...mins) : 0;
-            const maxMin = mins.length ? Math.max(...mins) : 0;
-            const goalTotal = Object.values(game.goals || {}).reduce((s, n) => s + n, 0);
-            const assistTotal = Object.values(game.assists || {}).reduce((s, n) => s + n, 0);
-
-            return (
-              <div key={idx} style={{ background: '#ffffff', borderRadius: 16, border: '3px solid #e2ecfc', overflow: 'hidden', transition: 'all 0.2s', boxShadow: isExpanded ? '0 12px 30px rgba(15,45,90,0.1)' : 'none' }}>
-                
-                {/* Game Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', cursor: 'pointer', background: isExpanded ? '#f8fafc' : '#fff', flexWrap: 'wrap', gap: 12 }} onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <div style={{ width: 48, height: 48, borderRadius: 12, background: 'linear-gradient(135deg, #1d6fcf, #0f2d5a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 900, color: '#fff', flexShrink: 0 }}>
-                      #{idx + 1}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: s(9) }}>
+              {fairness.map((row, i) => {
+                const isLowest = i === fairness.length - 1 && fairness.length > 1;
+                return (
+                  <div key={row.name} style={{
+                    ...card,
+                    border: isLowest ? `4px solid ${UI.stop}` : `2px solid ${UI.blueLine}`,
+                    padding: `${s(9)}px ${s(16)}px`,
+                    display: 'flex', alignItems: 'center', gap: s(16),
+                  }}>
+                    <div style={swatch(topPos(row.name))} />
+                    <div style={{ width: s(150), flexShrink: 0, fontSize: Math.max(18, s(27)), fontWeight: 800, color: UI.navy }}>
+                      {row.name}
                     </div>
-                    <div>
-                      <div style={{ fontSize: 18, fontWeight: 900, color: '#0f2d5a', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                        {game.label || `Match ${idx + 1}`}
-                        {game.result === 'W' && <span style={{ padding: '4px 10px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#059669' }}>W</span>}
-                        {game.result === 'D' && <span style={{ padding: '4px 10px', background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#b45309' }}>D</span>}
-                        {game.result === 'L' && <span style={{ padding: '4px 10px', background: '#fee2e2', border: '2px solid #fca5a5', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#dc2626' }}>L</span>}
-                        {game.ourScore != null && game.oppositionScore != null && <span style={{ padding: '4px 10px', background: '#f8fafc', border: '2px solid #cbd5e1', borderRadius: 8, fontSize: 13, fontWeight: 900, color: '#0f2d5a' }}>{game.ourScore} – {game.oppositionScore}</span>}
-                        {game.potm && <span style={{ padding: '4px 8px', background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 8, fontSize: 12, color: '#b45309' }}>⭐ {game.potm}</span>}
-                        {game.captain && <span style={{ padding: '4px 8px', background: '#fff7ed', border: '2px solid #fdba74', borderRadius: 8, fontSize: 12, color: '#c2410c' }}>🏅 {game.captain}</span>}
-                        {goalTotal > 0 && <span style={{ padding: '4px 8px', background: '#ecfdf5', border: '2px solid #6ee7b7', borderRadius: 8, fontSize: 12, color: '#047857' }}>⚽ {goalTotal} Goals</span>}
-                        {assistTotal > 0 && <span style={{ padding: '4px 8px', background: '#eff6ff', border: '2px solid #93c5fd', borderRadius: 8, fontSize: 12, color: '#1d4ed8' }}>🅰️ {assistTotal} Assists</span>}
-                        {game.notes && <span style={{ padding: '4px 8px', background: '#f5f3ff', border: '2px solid #c4b5fd', borderRadius: 8, fontSize: 12, color: '#7c3aed' }}>📝 Notes</span>}
-                      </div>
-                      <div style={{ fontSize: 14, color: '#64748b', marginTop: 4, fontWeight: 600 }}>
-                        {game.date} · {game.players.length} Players {minMin === maxMin ? `· Perfectly Equal Time (${minMin}m)` : `· Spread: ${minMin}m – ${maxMin}m`}
-                      </div>
+                    <div style={{ flex: 1, height: s(26), background: UI.track, borderRadius: s(5), minWidth: s(40) }}>
+                      <div style={{
+                        height: '100%', borderRadius: s(5),
+                        background: isLowest ? UI.stop : UI.navy,
+                        width: `${maxAvg > 0 ? (row.avg / maxAvg) * 100 : 0}%`,
+                      }} />
+                    </div>
+                    <div style={{
+                      width: s(74), flexShrink: 0, textAlign: 'right',
+                      fontSize: Math.max(17, s(25)), fontWeight: 800,
+                      color: isLowest ? UI.stop : UI.navy,
+                    }}>
+                      {row.avg}m
+                    </div>
+                    <div style={{
+                      width: s(134), flexShrink: 0, textAlign: 'right', whiteSpace: 'nowrap',
+                      fontSize: Math.max(13, s(17)), fontWeight: 700,
+                      color: isLowest ? UI.stop : UI.label,
+                    }}>
+                      {isLowest ? 'lowest · ' : ''}{row.t.games} game{row.t.games !== 1 ? 's' : ''}
+                      {row.t.gkH1 + row.t.gkH2 > 0 ? ` · GK ×${row.t.gkH1 + row.t.gkH2}` : ''}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <button onClick={e => { e.stopPropagation(); setEditGoals(game.goals ? { ...game.goals } : {}); setEditAssists(game.assists ? { ...game.assists } : {}); setEditPotm(game.potm || ''); setEditCaptain(game.captain || ''); setEditOurScore(game.ourScore != null ? String(game.ourScore) : ''); setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : ''); setEditNotes(game.notes || ''); setEditIdx(idx); }} style={{ padding: '8px 16px', background: '#e2ecfc', border: 'none', borderRadius: 8, color: '#1d6fcf', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
-                      ✏️ Edit
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }} style={{ padding: '8px 16px', background: '#fee2e2', border: 'none', borderRadius: 8, color: '#dc2626', fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>
-                      🗑
-                    </button>
-                  </div>
-                </div>
+                );
+              })}
+            </div>
+          </>
+        )}
 
-                {/* Expanded Player Details */}
-                {isExpanded && (
-                  <div style={{ padding: '16px 20px', borderTop: '3px solid #e2ecfc', background: '#fff' }}>
-                    {game.notes && (
-                      <div style={{ marginBottom: 16, padding: '14px 16px', borderRadius: 12, background: '#f5f3ff', border: '2px solid #c4b5fd' }}>
-                        <div style={{ fontSize: 11, fontWeight: 900, color: '#7c3aed', letterSpacing: 1, marginBottom: 6 }}>📝 MATCH NOTES</div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: '#3b1d8a', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{game.notes}</div>
+        {/* ── HONOURS ── */}
+        {tab === 'honours' && (
+          <>
+            <div style={{ ...sectionLabel, marginBottom: s(12) }}>Player of the week · captain · bench · goalkeeper</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: s(9) }}>
+              {[...allPlayers].sort((a, b) => {
+                const at = totals[a].potm + totals[a].captainGames;
+                const bt = totals[b].potm + totals[b].captainGames;
+                if (at !== bt) return bt - at;
+                return a.localeCompare(b);
+              }).map(p => {
+                const t = totals[p];
+                const dim = '#a8c0d8';
+                return (
+                  <div key={p} style={{
+                    ...card, padding: `${s(14)}px ${s(16)}px`,
+                    display: 'flex', alignItems: 'center', gap: s(16), flexWrap: 'wrap',
+                  }}>
+                    <div style={swatch(topPos(p))} />
+                    <div style={{ width: s(150), flexShrink: 0, fontSize: Math.max(18, s(27)), fontWeight: 800, color: UI.navy }}>
+                      {p}
+                    </div>
+                    <div style={{
+                      display: 'flex', gap: s(20), marginLeft: 'auto', flexWrap: 'wrap',
+                      fontSize: Math.max(14, s(20)), fontWeight: 800, color: UI.bodyText, whiteSpace: 'nowrap',
+                    }}>
+                      <span style={{ color: t.potm ? UI.bodyText : dim }}>⭐ {t.potm || '—'}</span>
+                      <span style={{ color: t.captainGames ? UI.bodyText : dim }}>🏅 {t.captainGames || '—'}</span>
+                      <span style={{ color: t.gkH1 || t.gkH2 ? UI.bodyText : dim }}>🧤 H1 {t.gkH1 || '—'} · H2 {t.gkH2 || '—'}</span>
+                      <span style={{ color: t.benchMins ? UI.bodyText : dim }}>🪑 {t.benchMins ? `${t.benchMins}m` : '—'}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* ── GOALS ── */}
+        {tab === 'goals' && (() => {
+          const maxG = Math.max(1, ...allPlayers.map(p => totals[p].goals));
+          const sorted = [...allPlayers].sort((a, b) => {
+            if (totals[b].goals !== totals[a].goals) return totals[b].goals - totals[a].goals;
+            if (totals[b].assists !== totals[a].assists) return totals[b].assists - totals[a].assists;
+            return a.localeCompare(b);
+          });
+          return (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: s(12), gap: s(12), flexWrap: 'wrap' }}>
+                <span style={sectionLabel}>Goals and assists</span>
+                <span style={{ fontSize: Math.max(14, s(18)), fontWeight: 800, color: UI.bodyText }}>
+                  {allPlayers.reduce((n, p) => n + totals[p].goals, 0)} goals · {allPlayers.reduce((n, p) => n + totals[p].assists, 0)} assists
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: s(9) }}>
+                {sorted.map(p => {
+                  const t = totals[p];
+                  return (
+                    <div key={p} style={{ ...card, padding: `${s(9)}px ${s(16)}px`, display: 'flex', alignItems: 'center', gap: s(16) }}>
+                      <div style={swatch(topPos(p))} />
+                      <div style={{ width: s(150), flexShrink: 0, fontSize: Math.max(18, s(27)), fontWeight: 800, color: UI.navy }}>
+                        {p}
                       </div>
-                    )}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-                      {game.players.map(p => {
-                        const mins = game.stats?.minutesMap?.[p] ?? 0;
-                        const sched = game.stats?.playerSchedule?.[p] || [];
-                        const positions = [...new Set(sched.filter(s => s && s !== 'BENCH'))];
-                        return (
-                          <div key={p} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: 12, border: '1px solid #cbd5e1' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                              <span style={{ fontSize: 14, fontWeight: 800, color: '#0f2d5a' }}>{p} {game.potm === p && '⭐'}</span>
-                              <div style={{ display: 'flex', gap: 4 }}>
-                                {positions.map(pos => (
-                                  <span key={pos} style={{ padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 800, background: POS_BG[pos] || '#64748b', color: POS_TEXT[pos] || '#fff', border: `1px solid ${POS_BORDER[pos] || 'transparent'}` }}>{pos}</span>
-                                ))}
-                                {sched.some(s => s === 'BENCH') && (
-                                  <span style={{ padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 900, background: '#fef3c7', color: '#b45309' }}>BENCH</span>
-                                )}
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 12, fontWeight: 800, fontSize: 14 }}>
-                              <span style={{ color: '#64748b' }}>{mins}m</span>
-                              {(game.goals?.[p] || 0) > 0 && <span style={{ color: '#d97706' }}>⚽ {game.goals[p]}</span>}
-                              {(game.assists?.[p] || 0) > 0 && <span style={{ color: '#059669' }}>🅰️ {game.assists[p]}</span>}
-                            </div>
+                      <div style={{ flex: 1, height: s(26), background: UI.track, borderRadius: s(5), minWidth: s(40) }}>
+                        <div style={{ height: '100%', borderRadius: s(5), background: UI.navy, width: `${(t.goals / maxG) * 100}%` }} />
+                      </div>
+                      <div style={{ width: s(74), flexShrink: 0, textAlign: 'right', fontSize: Math.max(17, s(25)), fontWeight: 800, color: UI.navy }}>
+                        {t.goals ? `${t.goals}⚽` : '—'}
+                      </div>
+                      <div style={{ width: s(134), flexShrink: 0, textAlign: 'right', whiteSpace: 'nowrap', fontSize: Math.max(13, s(17)), fontWeight: 700, color: UI.label }}>
+                        {t.assists ? `${t.assists} assist${t.assists !== 1 ? 's' : ''}` : 'no assists'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
+
+        {/* ── MATCHES ── */}
+        {tab === 'matches' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: s(12) }}>
+            {seasonGames.map((game, idx) => {
+              const isExpanded = expandedIdx === idx;
+              const mins = Object.values(game.stats?.minutesMap || {});
+              const minMin = mins.length ? Math.min(...mins) : 0;
+              const maxMin = mins.length ? Math.max(...mins) : 0;
+              const goalTotal = Object.values(game.goals || {}).reduce((n, x) => n + x, 0);
+              const assistTotal = Object.values(game.assists || {}).reduce((n, x) => n + x, 0);
+              const resultColour = game.result === 'W' ? UI.go : game.result === 'L' ? UI.stop : UI.label;
+
+              return (
+                <div key={game.id || idx} style={{ ...card, overflow: 'hidden' }}>
+                  <div
+                    onClick={() => setExpandedIdx(isExpanded ? null : idx)}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: `${s(14)}px ${s(18)}px`, cursor: 'pointer', gap: s(12), flexWrap: 'wrap',
+                    }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: s(14), minWidth: 0 }}>
+                      {game.result && (
+                        <div style={{
+                          width: s(44), height: s(44), borderRadius: s(10), flexShrink: 0,
+                          background: resultColour, color: '#fff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: Math.max(16, s(22)), fontWeight: 900,
+                        }}>{game.result}</div>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: Math.max(18, s(27)), fontWeight: 800, color: UI.navy }}>
+                          {game.label || `Match ${idx + 1}`}
+                          {game.ourScore != null && game.oppositionScore != null && (
+                            <span style={{ color: UI.bodyText, fontWeight: 700 }}> · {game.ourScore}–{game.oppositionScore}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: Math.max(13, s(18)), color: UI.label, fontWeight: 700, marginTop: s(2) }}>
+                          {game.date} · {game.players.length} players · {minMin === maxMin ? `all ${minMin}m` : `spread ${minMin}–${maxMin}m`}
+                          {game.potm ? ` · ⭐ ${game.potm}` : ''}
+                          {game.captain ? ` · 🏅 ${game.captain}` : ''}
+                          {goalTotal > 0 ? ` · ⚽ ${goalTotal}` : ''}
+                          {assistTotal > 0 ? ` · 👟 ${assistTotal}` : ''}
+                          {game.notes ? ' · 📝' : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: s(10), alignItems: 'center', flexShrink: 0 }}>
+                      <button onClick={e => {
+                        e.stopPropagation();
+                        setEditGoals(game.goals ? { ...game.goals } : {});
+                        setEditAssists(game.assists ? { ...game.assists } : {});
+                        setEditPotm(game.potm || '');
+                        setEditCaptain(game.captain || '');
+                        setEditOurScore(game.ourScore != null ? String(game.ourScore) : '');
+                        setEditOppScore(game.oppositionScore != null ? String(game.oppositionScore) : '');
+                        setEditNotes(game.notes || '');
+                        setEditIdx(idx);
+                      }} style={{ ...btnGhost, padding: `${s(10)}px ${s(18)}px` }}>✏️ Edit</button>
+                      <button onClick={e => { e.stopPropagation(); setConfirmIdx(idx); }}
+                        style={{ ...btnGhost, padding: `${s(10)}px ${s(18)}px`, borderColor: UI.stop, color: UI.stop }}>🗑</button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div style={{ padding: `${s(16)}px ${s(18)}px`, borderTop: `2px solid ${UI.blueLine}` }}>
+                      {game.notes && (
+                        <div style={{
+                          marginBottom: s(16), padding: `${s(14)}px ${s(16)}px`, borderRadius: s(12),
+                          background: UI.page, border: `2px solid ${UI.blueLine}`,
+                        }}>
+                          <div style={{ ...sectionLabel, marginBottom: s(6) }}>📝 Match notes</div>
+                          <div style={{ fontSize: Math.max(14, s(19)), fontWeight: 700, color: UI.navy, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                            {game.notes}
                           </div>
-                        );
-                      })}
+                        </div>
+                      )}
+                      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${s(280)}px, 1fr))`, gap: s(10) }}>
+                        {game.players.map(p => {
+                          const pm = game.stats?.minutesMap?.[p] ?? 0;
+                          const sched = game.stats?.playerSchedule?.[p] || [];
+                          const positions = [...new Set(sched.filter(x => x && x !== 'BENCH'))];
+                          return (
+                            <div key={p} style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              padding: s(12), background: UI.page, borderRadius: s(10),
+                              border: `2px solid ${UI.blueLine}`, gap: s(10),
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: s(10), minWidth: 0 }}>
+                                <span style={{ fontSize: Math.max(14, s(19)), fontWeight: 800, color: UI.navy }}>
+                                  {p}{game.potm === p ? ' ⭐' : ''}
+                                </span>
+                                <div style={{ display: 'flex', gap: s(4) }}>
+                                  {positions.map(pos => (
+                                    <span key={pos} style={{
+                                      padding: `${s(2)}px ${s(6)}px`, borderRadius: s(6),
+                                      fontSize: Math.max(11, s(14)), fontWeight: 800,
+                                      background: POS_BG[pos] || UI.track, color: '#111827',
+                                      border: `1px solid ${UI.navy}`,
+                                    }}>{pos}</span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: s(10), fontWeight: 800, fontSize: Math.max(13, s(18)), whiteSpace: 'nowrap' }}>
+                                <span style={{ color: UI.bodyText }}>{pm}m</span>
+                                {(game.goals?.[p] || 0) > 0 && <span style={{ color: UI.navy }}>⚽ {game.goals[p]}</span>}
+                                {(game.assists?.[p] || 0) > 0 && <span style={{ color: UI.navy }}>👟 {game.assists[p]}</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  )}
+                </div>
+              );
+            })}
 
+            {/* Reset season lives here, not in the header — it used to sit one
+                tap away from a destructive wipe of the whole season. */}
+            <button onClick={() => setConfirmIdx('all')} style={{
+              ...btnGhost, borderColor: UI.stop, color: UI.stop, marginTop: s(10),
+            }}>
+              🗑 Reset the whole season
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* ── Fat-Finger Edit Modal ── */}
+      {/* ══ Footer — sibling of the body so it never gets clipped ══ */}
+      {tab === 'fairness' && behind.length > 0 && (
+        <div style={{
+          ...card, flexShrink: 0, margin: `0 ${s(20)}px ${s(18)}px`,
+          padding: `${s(14)}px ${s(18)}px`, display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: s(16), flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: Math.max(15, s(20)), fontWeight: 700, color: UI.bodyText }}>
+            {behind.join(', ')} {behind.length > 1 ? 'are' : 'is'} furthest behind on minutes — the planner will favour {behind.length > 1 ? 'them' : 'them'} next game.
+          </span>
+          {onGoSetup && (
+            <button onClick={onGoSetup} style={{ ...btnSolid(UI.navy), padding: `${s(14)}px ${s(24)}px`, whiteSpace: 'nowrap' }}>
+              NEW MATCH →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Edit game modal ── */}
       {editIdx !== null && seasonGames[editIdx] && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div style={{ background: '#ffffff', borderRadius: 24, padding: '32px', maxWidth: 480, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 24 }}>
-              ✏️ Edit Game {editIdx + 1}
+        <div style={modalBackdrop}>
+          <div style={modalCard}>
+            <h2 style={{ fontSize: Math.max(22, s(34)), fontWeight: 800, color: UI.navy, marginTop: 0, marginBottom: s(24) }}>
+              ✏️ Edit {seasonGames[editIdx].label || `Match ${editIdx + 1}`}
             </h2>
 
-            {/* POTM */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>⭐ PLAYER OF THE MATCH</label>
-              <select value={editPotm} onChange={e => setEditPotm(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 800, color: editPotm ? '#d97706' : '#64748b', outline: 'none', cursor: 'pointer' }}>
+            <div style={{ marginBottom: s(20) }}>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>⭐ Player of the match</label>
+              <select value={editPotm} onChange={e => setEditPotm(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                 <option value="">— None —</option>
                 {seasonGames[editIdx].players.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
 
-            {/* Captain */}
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>🏅 CAPTAIN</label>
-              <select value={editCaptain} onChange={e => setEditCaptain(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 16, fontWeight: 800, color: editCaptain ? '#c2410c' : '#64748b', outline: 'none', cursor: 'pointer' }}>
+            <div style={{ marginBottom: s(20) }}>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>🏅 Captain</label>
+              <select value={editCaptain} onChange={e => setEditCaptain(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                 <option value="">— None —</option>
                 {seasonGames[editIdx].players.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
 
-            {/* Score */}
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 12, letterSpacing: 1 }}>GAME RESULT</label>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+            <div style={{ marginBottom: s(24) }}>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(10) }}>Score</label>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: s(14) }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>OUR SCORE</div>
-                  <input type="number" min="0" value={editOurScore} onChange={e => setEditOurScore(e.target.value)} placeholder="–" style={{ width: '100%', padding: '12px', borderRadius: 12, border: '3px solid #1d6fcf', fontSize: 24, fontWeight: 900, textAlign: 'center', boxSizing: 'border-box', color: '#0f2d5a', outline: 'none' }} />
+                  <div style={{ fontSize: Math.max(12, s(16)), fontWeight: 800, color: UI.label, marginBottom: s(6), textAlign: 'center' }}>US</div>
+                  <input type="number" min="0" value={editOurScore} onChange={e => setEditOurScore(e.target.value)} placeholder="–"
+                    style={{ ...inputStyle, border: `4px solid ${UI.navy}`, fontSize: Math.max(26, s(40)), fontWeight: 800, textAlign: 'center' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 900, color: '#4a6b8a', paddingBottom: 12, flexShrink: 0 }}>–</div>
+                <div style={{ fontSize: Math.max(20, s(30)), fontWeight: 800, color: UI.label, paddingBottom: s(14) }}>–</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>OPPOSITION</div>
-                  <input type="number" min="0" value={editOppScore} onChange={e => setEditOppScore(e.target.value)} placeholder="–" style={{ width: '100%', padding: '12px', borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 24, fontWeight: 900, textAlign: 'center', boxSizing: 'border-box', color: '#64748b', outline: 'none' }} />
+                  <div style={{ fontSize: Math.max(12, s(16)), fontWeight: 800, color: UI.label, marginBottom: s(6), textAlign: 'center' }}>THEM</div>
+                  <input type="number" min="0" value={editOppScore} onChange={e => setEditOppScore(e.target.value)} placeholder="–"
+                    style={{ ...inputStyle, fontSize: Math.max(26, s(40)), fontWeight: 800, textAlign: 'center' }} />
                 </div>
               </div>
             </div>
 
-            {/* Goals & Assists List */}
-            <div style={{ marginBottom: 32 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 12, letterSpacing: 1 }}>⚽ GOALS & 🅰️ ASSISTS</label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ marginBottom: s(28) }}>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(12) }}>⚽ Goals &amp; 👟 assists</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: s(10) }}>
                 {seasonGames[editIdx].players.map(p => (
-                  <div key={p} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: 12, border: '2px solid #e2ecfc', gap: 12 }}>
-                    <span style={{ fontSize: 16, fontWeight: 800, color: '#0f2d5a', flex: '1 1 auto', minWidth: '80px' }}>{p}</span>
-                    
-                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                      {/* Goals Stepper */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: '#d97706' }}>⚽</span>
-                        <button onClick={() => setEditGoals(g => ({ ...g, [p]: Math.max(0, (g[p] || 0) - 1) }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#fff', border: '2px solid #fcd34d', color: '#d97706', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>−</button>
-                        <span style={{ fontSize: 18, fontWeight: 900, color: (editGoals[p] || 0) > 0 ? '#b45309' : '#cbd5e1', width: 24, textAlign: 'center' }}>{editGoals[p] || 0}</span>
-                        <button onClick={() => setEditGoals(g => ({ ...g, [p]: (g[p] || 0) + 1 }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#f59e0b', border: 'none', color: '#fff', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>+</button>
-                      </div>
-
-                      {/* Assists Stepper */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: '#059669' }}>🅰️</span>
-                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: Math.max(0, (a[p] || 0) - 1) }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#fff', border: '2px solid #6ee7b7', color: '#059669', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>−</button>
-                        <span style={{ fontSize: 18, fontWeight: 900, color: (editAssists[p] || 0) > 0 ? '#047857' : '#cbd5e1', width: 24, textAlign: 'center' }}>{editAssists[p] || 0}</span>
-                        <button onClick={() => setEditAssists(a => ({ ...a, [p]: (a[p] || 0) + 1 }))} style={{ width: 36, height: 36, borderRadius: 8, background: '#10b981', border: 'none', color: '#fff', fontSize: 20, fontWeight: 900, cursor: 'pointer' }}>+</button>
-                      </div>
+                  <div key={p} style={{
+                    display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
+                    padding: s(12), background: UI.page, borderRadius: s(12),
+                    border: `2px solid ${UI.blueLine}`, gap: s(12),
+                  }}>
+                    <span style={{ fontSize: Math.max(16, s(22)), fontWeight: 800, color: UI.navy, flex: '1 1 auto', minWidth: s(80) }}>{p}</span>
+                    <div style={{ display: 'flex', gap: s(16), flexWrap: 'wrap' }}>
+                      {[
+                        { icon: '⚽', get: editGoals, set: setEditGoals },
+                        { icon: '👟', get: editAssists, set: setEditAssists },
+                      ].map(({ icon, get, set }) => (
+                        <div key={icon} style={{ display: 'flex', alignItems: 'center', gap: s(8) }}>
+                          <span style={{ fontSize: Math.max(13, s(17)) }}>{icon}</span>
+                          <button onClick={() => set(g => ({ ...g, [p]: Math.max(0, (g[p] || 0) - 1) }))}
+                            style={{ width: s(44), height: s(44), borderRadius: s(10), background: '#fff', border: `3px solid ${UI.blueLine}`, color: UI.bodyText, fontSize: Math.max(18, s(24)), fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>−</button>
+                          <span style={{ fontSize: Math.max(16, s(22)), fontWeight: 800, color: (get[p] || 0) > 0 ? UI.navy : '#a8c0d8', width: s(24), textAlign: 'center' }}>{get[p] || 0}</span>
+                          <button onClick={() => set(g => ({ ...g, [p]: (g[p] || 0) + 1 }))}
+                            style={{ width: s(44), height: s(44), borderRadius: s(10), background: UI.navy, border: 'none', color: '#fff', fontSize: Math.max(18, s(24)), fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>+</button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 900, color: '#64748b', marginBottom: 8, letterSpacing: 1 }}>📝 MATCH NOTES</label>
-              <textarea
-                value={editNotes}
-                onChange={e => setEditNotes(e.target.value)}
+            <div style={{ marginBottom: s(24) }}>
+              <label style={{ ...sectionLabel, display: 'block', marginBottom: s(8) }}>📝 Match notes</label>
+              <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)}
                 placeholder="Tactics, HT talk, training focus..."
-                style={{ width: '100%', minHeight: 100, padding: 14, borderRadius: 12, border: '3px solid #e2ecfc', fontSize: 15, fontWeight: 600, color: '#0f2d5a', background: '#f8fafc', resize: 'vertical', boxSizing: 'border-box', outline: 'none', fontFamily: 'system-ui, sans-serif', lineHeight: 1.5 }}
-              />
+                style={{ ...inputStyle, minHeight: s(100), resize: 'vertical', lineHeight: 1.5 }} />
             </div>
 
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button onClick={() => setEditIdx(null)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 16, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+            <div style={{ display: 'flex', gap: s(12) }}>
+              <button onClick={() => setEditIdx(null)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
               <button onClick={() => {
-                  const goals = Object.fromEntries(Object.entries(editGoals).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
-                  const assists = Object.fromEntries(Object.entries(editAssists).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
-                  const ourSc = editOurScore !== '' ? Number(editOurScore) : null;
-                  const oppSc = editOppScore !== '' ? Number(editOppScore) : null;
-                  const result = (ourSc != null && oppSc != null) ? (ourSc > oppSc ? 'W' : ourSc < oppSc ? 'L' : 'D') : null;
-                  onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, captain: editCaptain || null, ourScore: ourSc, oppositionScore: oppSc, result, notes: editNotes });
-                  setEditIdx(null);
-                }} style={{ flex: 2, padding: 16, background: '#1d6fcf', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
-                💾 Save Changes
+                const goals = Object.fromEntries(Object.entries(editGoals).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
+                const assists = Object.fromEntries(Object.entries(editAssists).filter(([, v]) => v > 0).map(([k, v]) => [k, Number(v)]));
+                const ourSc = editOurScore !== '' ? Number(editOurScore) : null;
+                const oppSc = editOppScore !== '' ? Number(editOppScore) : null;
+                const result = (ourSc != null && oppSc != null) ? (ourSc > oppSc ? 'W' : ourSc < oppSc ? 'L' : 'D') : null;
+                onUpdateGame(editIdx, { goals, assists, potm: editPotm || null, captain: editCaptain || null, ourScore: ourSc, oppositionScore: oppSc, result, notes: editNotes });
+                setEditIdx(null);
+              }} style={{ ...btnSolid(UI.go), flex: 2 }}>
+                💾 Save changes
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Confirm Delete Modal ── */}
+      {/* ── Confirm delete ── */}
       {confirmIdx !== null && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,45,90,0.85)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div style={{ background: '#ffffff', borderRadius: 24, padding: '32px', maxWidth: 400, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', textAlign: 'center' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🗑️</div>
-            <h2 style={{ fontSize: 24, fontWeight: 900, color: '#0f2d5a', marginTop: 0, marginBottom: 12 }}>
-              {confirmIdx === 'all' 
-                ? 'Reset Entire Season?' 
-                : `Delete Match ${confirmIdx + 1}${seasonGames[confirmIdx]?.label ? ` (${seasonGames[confirmIdx].label})` : ''}?`}
+        <div style={modalBackdrop}>
+          <div style={{ ...modalCard, maxWidth: s(440), textAlign: 'center' }}>
+            <div style={{ fontSize: s(48), marginBottom: s(16) }}>🗑️</div>
+            <h2 style={{ fontSize: Math.max(20, s(30)), fontWeight: 800, color: UI.navy, marginTop: 0, marginBottom: s(12) }}>
+              {confirmIdx === 'all'
+                ? 'Reset the entire season?'
+                : `Delete ${seasonGames[confirmIdx]?.label || `match ${confirmIdx + 1}`}?`}
             </h2>
-            <p style={{ fontSize: 16, color: '#64748b', fontWeight: 600, marginBottom: 32 }}>This cannot be undone.</p>
-            
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button onClick={() => setConfirmIdx(null)} style={{ flex: 1, padding: 16, background: '#f1f5f9', border: 'none', borderRadius: 12, color: '#64748b', fontSize: 16, fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+            <p style={{ fontSize: Math.max(15, s(20)), color: UI.bodyText, fontWeight: 700, marginBottom: s(28) }}>
+              This cannot be undone.{confirmIdx === 'all' ? ' Export a backup first if you are not certain.' : ''}
+            </p>
+            <div style={{ display: 'flex', gap: s(12) }}>
+              <button onClick={() => setConfirmIdx(null)} style={{ ...btnGhost, flex: 1 }}>Cancel</button>
               <button onClick={() => {
-                  if (confirmIdx === 'all') onClearAll();
-                  else {
-                    if (expandedIdx === confirmIdx) setExpandedIdx(null);
-                    else if (expandedIdx > confirmIdx) setExpandedIdx(expandedIdx - 1);
-                    onDeleteGame(confirmIdx);
-                  }
-                  setConfirmIdx(null);
-                }} style={{ flex: 1, padding: 16, background: '#dc2626', border: 'none', borderRadius: 12, color: '#fff', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}>
-                {confirmIdx === 'all' ? 'Reset All' : 'Delete'}
+                if (confirmIdx === 'all') onClearAll();
+                else {
+                  if (expandedIdx === confirmIdx) setExpandedIdx(null);
+                  else if (expandedIdx > confirmIdx) setExpandedIdx(expandedIdx - 1);
+                  onDeleteGame(confirmIdx);
+                }
+                setConfirmIdx(null);
+              }} style={{ ...btnSolid(UI.stop), flex: 1 }}>
+                {confirmIdx === 'all' ? 'Reset all' : 'Delete'}
               </button>
             </div>
           </div>

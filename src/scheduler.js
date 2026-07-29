@@ -664,6 +664,37 @@ export function findMembershipDrift(before, after) {
 }
 
 // ---------------------------------------------------------------------------
+// Schedule lookahead
+// ---------------------------------------------------------------------------
+
+/**
+ * Answers "when am I going back on?" — the question the kids ask constantly.
+ *
+ * Walks forward from `fromSegIdx` (exclusive) to the first segment where the
+ * player is on the field, summing durations to get the match minute that
+ * segment starts at.
+ *
+ * Returns { minute, pos, segIdx } or null if they never reappear.
+ * `minute` is the match clock minute they come on, counted from kickoff.
+ */
+export function nextAppearance(segments, fromSegIdx, playerName) {
+  if (!Array.isArray(segments) || !playerName) return null;
+
+  // Minute at which the segment AFTER fromSegIdx begins.
+  let minute = 0;
+  for (let i = 0; i <= fromSegIdx && i < segments.length; i++) {
+    minute += segments[i].duration;
+  }
+
+  for (let i = fromSegIdx + 1; i < segments.length; i++) {
+    const entry = Object.entries(segments[i].assignment).find(([, n]) => n === playerName);
+    if (entry) return { minute, pos: entry[0], segIdx: i };
+    minute += segments[i].duration;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Statistics calculator
 // ---------------------------------------------------------------------------
 
