@@ -574,6 +574,28 @@ for touch, poor for accessibility.
 
 ---
 
+## Backlog / Planned Features
+
+### Late arrival should not disturb players already on (high value — bit us on 20/6)
+**Problem seen:** A player arrived after the first sub. The bench girls had just gone on; when the coach added the newcomer via LATE PLAYER, `replan.js` rebuilt the remainder from the *new* squad size's template. That (a) changed the period cadence mid-game (e.g. 5-min subs → 10/15-min) and (b) re-derived the bench, pulling the just-subbed-on girls straight back off after ~2 minutes. Coach ignored it, but it threw the whole day's minutes out.
+
+**Wanted behaviour:** A mid-game roster add keeps everyone currently on the field *on*, keeps the current period lengths, and folds the newcomer into the bench rotation going forward — nobody already playing comes off unless the coach chooses. Rebalance minutes over the rest of the game, not by an immediate reshuffle.
+
+**Notes for the implementer:**
+- Core change is in `replan.js` — today it scales a fresh `getHalfTemplate(newSquadSize, half)` over the remainder (the cadence swap). Prefer preserving the active period boundaries and only inserting the new player into the bench cycle.
+- Check the interaction with the Session-11 `rebalanceRemainder` / FINISH-EDITING rebalance and the Session-12 integrity guards (`findLineupIssue` / `findMembershipDrift`) so the softer add still passes validation.
+- Accept the trade-off explicitly: keeping cadence loosens the "everyone equal minutes" maths in-game (rebalance over the game instead). That is the coach's preferred trade.
+
+### Editable per-period bench — choose / defer who comes off
+**Wanted behaviour:** Let the coach pick which players sit each upcoming period, so an auto-selected sub can be overridden or deferred to a later period (e.g. "those girls can come off, but next period, not now").
+
+**Notes for the implementer:**
+- The machinery mostly exists: `applySwap` / `handleSwap` already move a player on/off within a period and propagate forward; a purpose-built "who's off this period" editor is a thin, friendlier layer over it.
+- The important guarantee: manual bench choices must **survive a later roster change** — a subsequent LATE PLAYER / PLAYER OUT replan must not wipe them (ties into the item above).
+- This is a good incremental step toward the "parallel-track rewrite" flagged in Session 8, without committing to the full rewrite.
+
+---
+
 ## UI Rules (Must Follow)
 - **No `window.confirm()` or `window.alert()`** — sandboxed iframe. All confirmations use inline modal overlays.
 - **Toast notifications:** 2800ms auto-dismiss. `ok` (green) / `err` (red) via `showToast(msg, type)` in `App.jsx`.
