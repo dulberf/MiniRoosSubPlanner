@@ -136,7 +136,7 @@ export default function TeamSheetView({
         clearInterval(wipeTimerRef.current);
         wipeTimerRef.current = null;
         setWipeHold(0);
-        wakeLockRef.current?.release();
+        releaseWakeLock();
         onResetGame?.();
         setSquadOpen(false);
       }
@@ -301,6 +301,7 @@ export default function TeamSheetView({
     return () => clearInterval(interval);
   }, [gameClock.isRunning]);
 
+
   // Save in-progress state whenever the segment advances
   const matchStatsRef = useRef(matchStats);
   matchStatsRef.current = matchStats;
@@ -313,6 +314,9 @@ export default function TeamSheetView({
   currentSegRef.current = currentSeg;
   const onProgressUpdateRef = useRef(onProgressUpdate);
   onProgressUpdateRef.current = onProgressUpdate;
+  // The visibility handler registers once and must read the live clock state.
+  const gameClockRef = useRef(gameClock);
+  gameClockRef.current = gameClock;
   const debounceRef = useRef(null);
   const audioCtxRef = useRef(null);
   const wakeLockRef = useRef(null);
@@ -336,13 +340,42 @@ export default function TeamSheetView({
     }
   };
 
+  // The wake lock stops the iPad sleeping through a sub (Session 7). It is also
+  // the app's single biggest power cost — the screen is the drain, held at
+  // sun-readable brightness. Session 18 scoped it to the clock: held while the
+  // period is running, released the moment it is not. It used to stay on
+  // through all of half-time and indefinitely after the final whistle, which
+  // bought nothing.
   const acquireWakeLock = async () => {
     try {
-      if (navigator.wakeLock) {
+      if (navigator.wakeLock && !wakeLockRef.current) {
         wakeLockRef.current = await navigator.wakeLock.request('screen');
+        // The browser drops the lock whenever the page is hidden; clear our
+        // handle so the visibility handler knows to take a fresh one.
+        wakeLockRef.current.addEventListener?.('release', () => {
+          wakeLockRef.current = null;
+        });
       }
     } catch (_) {}
   };
+
+  const releaseWakeLock = () => {
+    try { wakeLockRef.current?.release(); } catch (_) {}
+    wakeLockRef.current = null;
+  };
+
+  // Wake lock follows the clock: held while a period runs, released the moment
+  // it stops. Half-time, a paused game and the wait after full-time all let the
+  // screen sleep normally now. Declared BELOW acquire/release on purpose —
+  // Session 7 crashed on a TDZ from an effect placed above its dependencies.
+  useEffect(() => {
+    if (gameClock.isRunning) acquireWakeLock();
+    else releaseWakeLock();
+  }, [gameClock.isRunning]);
+
+  // Never leak the lock if this screen goes away without passing through
+  // Save Game or a reset.
+  useEffect(() => () => releaseWakeLock(), []);
 
   const buzz = (freq = 660, duration = 0.3, volume = 0.5, startOffset = 0) => {
     const ctx = audioCtxRef.current;
@@ -383,7 +416,9 @@ export default function TeamSheetView({
       if (document.visibilityState === 'hidden') flushSave();
       if (document.visibilityState === 'visible') {
         audioCtxRef.current?.resume();
-        acquireWakeLock();
+        // Only re-take the lock if a period is actually running. Coming back to
+        // a paused game must not pin the screen on.
+        if (gameClockRef.current.isRunning) acquireWakeLock();
       }
     };
     const handleBeforeUnload = () => flushSave();
@@ -2110,7 +2145,7 @@ export default function TeamSheetView({
                   if (stats.goals && stats.goals > 0) formattedGoals[p] = stats.goals;
                   if (stats.assists && stats.assists > 0) formattedAssists[p] = stats.assists;
                 });
-                wakeLockRef.current?.release();
+                releaseWakeLock();
                 onSave({ label: matchLabel, potm, captain, goals: formattedGoals, assists: formattedAssists, ourScore: ourScore !== '' ? Number(ourScore) : trackedGoals, oppositionScore: oppositionScore !== '' ? Number(oppositionScore) : null, notes: matchNotes });
                 setSaveOpen(false);
                 onGoSeason();

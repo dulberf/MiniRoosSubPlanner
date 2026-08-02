@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react';
 import { getSegmentConfig, rankByGKFairness } from '../scheduler.js';
 import { DEFAULT_PLAYERS, MIN_PLAYERS, MAX_PLAYERS, UI } from '../constants.js';
 import useScale from '../useScale.js';
+import useOfflineReady from '../useOfflineReady.js';
 
 export default function InputView({
   playersText, setPlayersText,
@@ -26,6 +27,7 @@ export default function InputView({
   seasonGames = [],
 }) {
   const { s } = useScale();
+  const offlineReady = useOfflineReady();
   const [showRawText, setShowRawText] = useState(false);
   const [gk1Expanded, setGk1Expanded] = useState(false);
   const [gk2Expanded, setGk2Expanded] = useState(false);
@@ -174,6 +176,19 @@ export default function InputView({
           <div style={{ fontSize: Math.max(15, s(15)), fontWeight: 800, color: UI.onNavyMuted, letterSpacing: s(2) }}>
             9V9 · 2 × 25 MIN · ROLLING SUBS
           </div>
+          {/* Session 18. The app failed at a ground with nothing on screen to
+              warn that no copy was stored. Check this before you leave wifi. */}
+          {offlineReady !== 'n/a' && (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: s(8), marginTop: s(8),
+              padding: `${s(5)}px ${s(12)}px`, borderRadius: 999,
+              background: offlineReady === 'ready' ? UI.goTint : UI.warnTint,
+              color: offlineReady === 'ready' ? UI.go : UI.warn,
+              fontSize: Math.max(15, s(16)), fontWeight: 900, letterSpacing: s(1),
+            }}>
+              {offlineReady === 'ready' ? 'WORKS OFFLINE ✓' : 'NOT SAVED YET — STAY ON WIFI'}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: s(10) }}>
           <button type="button" onClick={onGoSeason} style={{
