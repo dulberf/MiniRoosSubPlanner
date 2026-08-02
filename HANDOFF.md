@@ -686,7 +686,11 @@ for touch, poor for accessibility.
 **Issue 3 fixed — stable game ids stop duplicate saves:**
 - Old identity was "today's date + players JSON"; editing a game on a later day appended a duplicate (proof: games 27/6 "Budgiewoi r7" and 4/7 blank-label are byte-identical in the season export).
 - Every game now gets `id: crypto.randomUUID()` on first save; edits replace by id and preserve the original match date; `loadSeason` lazily migrates legacy games; import dedups by id with the legacy key as fallback. New `currentGameId` state in App, reset on generate/reorder/reset.
-- ⚠️ **The existing duplicate (4/7/2026, blank label) must still be deleted manually in the Season view on the iPad** — code can't remove it retroactively.
+- ~~⚠️ The existing duplicate (4/7/2026, blank label) must still be deleted manually in the Season
+  view on the iPad~~ — **removed 2/8/2026** in `teamsheet-season-2026-08-02-corrected.json`, along
+  with the addition of the lost 18/7 game. It had been crediting 11 players with minutes, bench time
+  and GK duty for a game that never happened, skewing every fairness figure since 4/7. Note import
+  **merges**, so the device only picks this up after Reset Season → Import.
 
 **Tests:** `test/rebalance.test.mjs` (6 new tests, 9 total passing): mid-game swap → everyone rests exactly once, spread ≤ 10; late-edit case → optimal spread ≤ 20 (provably minimal with one changeover left); edited segment/durations/labels/GK plan preserved; H1 edit rebalances H2; no-op guards; oracle reads real bench minutes.
 
