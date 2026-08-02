@@ -904,6 +904,12 @@ for touch, poor for accessibility.
   anything used during a game.
 - **All sizes go through `s(px)` from `useScale()`** in the live game screen — never hardcode px.
 - **Offline first** — no CDN, no network calls, everything compiled into the single HTML.
+- **"Reset the whole season" stays hard to find.** It sits at the bottom of the MATCHES tab, below
+  every match card, on a tab that is not the default. That looks like a discoverability bug and is
+  not one — the coach's call, 2/8/2026: *"it's actually good that it's hidden."* It wipes the entire
+  season and is used roughly never. Do not promote it to the header, a pinned footer, or a
+  hold-to-confirm control. Contrast `Wipe the game` in the squad sheet, which IS pinned and held,
+  because wiping one match mid-game is a plausible thing to want in a hurry.
 
 ---
 
