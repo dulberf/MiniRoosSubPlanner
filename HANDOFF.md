@@ -1,5 +1,5 @@
 # MiniRoos Sub Planner — Technical Handoff
-*Last updated: 2026-07-29 (Session 17 complete — on `main`)*
+*Last updated: 2026-08-02 (Session 18 complete — on `main`)*
 
 **Repo:** https://github.com/dulberf/MiniRoosSubPlanner
 **Live app:** https://dulberf.github.io/MiniRoosSubPlanner/
@@ -179,6 +179,106 @@ Dedup key: `date + JSON.stringify(players) + label`.
 
 ## Session History
 
+### Session 18 — 🚨 Offline broken at a game. Root-caused and fixed ✅
+**This is the most important entry in this file. Read it before touching `public/sw.js`.**
+
+**What happened.** At a match on 1/8/2026 the app would not open with no network — a Safari
+network-error page, not a blank screen. Connecting a phone hotspot fixed it; disconnecting broke it
+again. The coach ran the game manually and lost the minutes, goals and assists for it.
+
+**Root cause, measured on the live site — not theorised.** After a successful online load the
+`team-sheet-v2` cache contained **exactly one entry: `sw.js`**. The app itself was not in it:
+
+```
+cachedEntries: [".../sw.js"]   matchesCurrentPage: false   matchesIndexHtml: false
+```
+
+Three properties of the Session 15 worker combined:
+1. **Nothing was precached at install.** The cache only ever held what the worker happened to
+   intercept via cache-on-fetch.
+2. **The navigation that installs a worker is not controlled by it**, so the *first* page load after
+   any deploy was never cached. Only the second load stored the app.
+3. **`activate` deleted the previous cache immediately**, before anything had replaced it.
+
+So the Session 15 deploy **wiped the populated `team-sheet-v1` cache that had been working all
+season** and left an empty `v2`. Whether the app survived offline then depended on whether a second
+load happened to occur before the iPad left the house. It didn't. `networkFirst` found nothing to
+fall back on, rethrew, and the browser showed its own error page.
+
+**⚠️ The Session 15 entry below claims "Verified, not assumed" and describes a "true offline test".
+That verification was invalid** — it drove the service worker API directly against the dev server,
+but `index.html` deliberately *unregisters* workers on localhost, so the deployed path (real
+navigation, PWA on iOS, a cache emptied by activate) was never exercised. **A service-worker change
+is only verified on the deployed HTTPS origin. Localhost cannot test this subsystem at all.**
+
+**The judgement error worth remembering.** The pre-Session-15 worker was cache-first and never went
+back to the network — which is exactly why it always worked at a field. Session 15 framed that as
+the bug ("answered *every* request from cache and never went back to the network"). The inability to
+update was a real problem, but the fix traded away the guarantee the app exists for, and shipped the
+trade as an improvement. **Both are achievable. Offline wins ties.**
+
+**What `public/sw.js` (`team-sheet-v3`) does now:**
+- **Precaches the shell at INSTALL** — `./` required, `index.html`/`manifest.json`/`icon.svg`
+  best-effort — with a plain-`add` fallback if `cache: 'reload'` is rejected. A working copy exists
+  before any navigation. **This is the piece whose absence caused the failure. Do not remove it.**
+- **Page loads are cache-first.** The app opens from cache with zero network on the critical path;
+  the refresh is fetched in the background and applies on the next open. Updates still land.
+- **Never deletes an old cache until the new one can actually serve the app.** If install fails
+  (offline, say), the old worker and its populated cache survive intact — the failure mode inverted.
+- **`AbortController` + timeout on background refreshes, skipped entirely when
+  `navigator.onLine === false`**, so a dead signal cannot leave the radio hunting. The old `timeout()`
+  helper also leaked a timer per request and never aborted the losing fetch.
+- **Revalidates navigations only**, not every asset — the build is one inlined file, so that is one
+  background request per open instead of four.
+- **All cache bookkeeping is wrapped so it can never affect the response.** The old code let a failed
+  `waitUntil` fall into the `catch` and rethrow, turning a bookkeeping error into an error page.
+
+**Verified on the deployed origin, from a fully cleared state (SW unregistered, all caches deleted):**
+- **One** load now caches `./` + `index.html` + `manifest.json` + `icon.svg`; the shell is 266,511
+  bytes and contains the real app. Previously one load cached only `sw.js`.
+- Only `team-sheet-v3` remains — `v2` was swept *after* the new shell was confirmed present.
+- **Navigating to a path GitHub Pages 404s served the full working app from cache**, not a 404 page.
+  That is the offline path proven: the worker answers navigations from cache regardless of what the
+  network says.
+- Background revalidation fires on navigation (confirmed in the network log), so updates still reach
+  the device on the next open.
+- No console errors.
+
+⚠️ **Still not proven by me: real airplane-mode cold open on the coach's iPad from the home screen.**
+That is the coach's check, and it is the only one that counts. Do not write "verified offline" in
+this file for anything short of it.
+
+**Battery (15% → 4% in 17 minutes, reported same day).** Investigated with measurements:
+- **Ruled out: the 500ms clock tick.** The rendered tree is **146 DOM nodes**. Reconciling that twice
+  a second costs nothing. It was left alone rather than "fixed" for appearances.
+- **Fixed: the wake lock now follows the clock** — acquired while a period runs, released when it
+  stops, released on unmount, and not re-taken when returning to a *paused* game. It previously held
+  the screen awake through all of half-time and indefinitely after the final whistle. The screen is
+  the app's dominant power cost, so this is the one change that matters.
+- **Not done: suspending the `AudioContext`** between buzzes. It is created on START and never
+  suspended (there is no `suspend()`/`close()` anywhere in `src/`), which is technically wrong, but
+  iOS attributed only ~6% of consumption to Safari — it is a rounding error, and the buzzer code has
+  already caused one production crash (Session 7 TDZ). Left deliberately. Revisit only with evidence.
+- **Honest conclusion:** most of that drain was the iPad itself — radio hunting with no coverage
+  while the app repeatedly failed to open, plus a screen held on in the sun. The offline fix removes
+  the scenario. The device also started the match at 15%.
+
+**New: a `WORKS OFFLINE ✓` / `NOT SAVED YET — STAY ON WIFI` badge** in the setup-screen header
+(`src/useOfflineReady.js`, read from CacheStorage directly rather than from the worker's opinion of
+itself; renders nothing on localhost). The failure was invisible until it mattered. Now it isn't,
+and the coach does not have to take anyone's word for it.
+
+**Files touched:** `public/sw.js` (rewritten), `src/useOfflineReady.js` (new),
+`src/components/InputView.jsx`, `src/components/TeamSheetView.jsx`, `team-sheet-offline.html`
+(rebuilt), `HANDOFF.md`.
+
+**Rules going forward:**
+- **Never deploy a service-worker change on a Friday**, or in the 48 hours before a game.
+- **Test service-worker changes on the deployed HTTPS origin**, from a cleared state, and check the
+  cache contents after exactly **one** load.
+- **Offline beats freshness.** Any future change that puts the network on the critical path of a page
+  load is a regression, regardless of what it buys.
+
 ### Session 17 — Design screens 3b (squad sheet) + 3c (player off) + 3d (minutes prompt) ✅
 Built as one lump on purpose: 3b **deletes** the two modals 3c replaces, so splitting them would
 leave the app half-migrated. Same v3 bundle as Session 16.
@@ -353,7 +453,11 @@ identically in round 1 and round 30 because "never" sorts ahead of any round num
 3b deletes the modals 3c replaces, so splitting them leaves the app half-migrated), then 4b
 landscape, then the accessibility pass. *(3b/3c/3d done in Session 17.)*
 
-### Session 15 — Service worker: offline kept, stale-forever fixed ✅
+### Session 15 — Service worker: stale-forever fixed, ⚠️ BUT OFFLINE WAS BROKEN ⚠️
+> **🚨 Read Session 18 first. This entry is kept for the history, but its central claim is false.**
+> It says offline was preserved and "verified". It was not: the change removed the guarantee and the
+> app failed to open at a game two weeks later. The "true offline test" described below never touched
+> the deployed path. Do not use this entry as a model for how to verify a worker.
 **The constraint that drove every decision here:** the app is used on a football field with **no
 wifi**. It must open with no network, every time. That is not negotiable, and it is why the worker
 still caches everything the app fetches on the way past (cache-on-fetch) rather than from a
@@ -736,7 +840,11 @@ for touch, poor for accessibility.
 ---
 
 ## Known Issues & Watch List
-- ~~`public/sw.js` serves stale code forever~~ **fixed in Session 15** — see the session entry.
+- ~~`public/sw.js` serves stale code forever~~ fixed in Session 15, **which broke offline** —
+  root-caused and fixed properly in Session 18. Both properties now hold. See Session 18 before
+  touching that file.
+- **The wake lock is the app's main power cost** and is now tied to the clock. If a future change
+  makes the screen stay on while the clock is paused, that is a regression.
 - **Vite dev server binds IPv6 only** (`[::1]:5174`), so `http://localhost:5174` fails in browsers
   that resolve to IPv4 first and you get a blank untitled tab. Use `http://[::1]:5174`, or add
   `--host 127.0.0.1` to `.claude/launch.json`. Opening `team-sheet-offline.html` directly needs no
