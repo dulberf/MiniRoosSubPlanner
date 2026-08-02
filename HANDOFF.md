@@ -244,9 +244,9 @@ trade as an improvement. **Both are achievable. Offline wins ties.**
   the device on the next open.
 - No console errors.
 
-⚠️ **Still not proven by me: real airplane-mode cold open on the coach's iPad from the home screen.**
-That is the coach's check, and it is the only one that counts. Do not write "verified offline" in
-this file for anything short of it.
+✅ **Confirmed by the coach on the iPad, 2/8/2026:** the `WORKS OFFLINE ✓` badge showed, wifi off,
+reopened, app working. That is the check that actually counts — the deployed-origin tests above are
+necessary but not sufficient. **Do not write "verified offline" in this file again without it.**
 
 **Battery (15% → 4% in 17 minutes, reported same day).** Investigated with measurements:
 - **Ruled out: the 500ms clock tick.** The rendered tree is **146 DOM nodes**. Reconciling that twice
